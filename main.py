@@ -291,13 +291,40 @@ class CoffeeBot:
         )
     
     def run(self):
-        """Запуск бота"""
-        try:
-            logger.info("Запуск бота...")
-            logger.info("Ожидание сообщений...")
-            self.app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-        except Exception as e:
-            logger.error(f"Ошибка при запуске бота: {e}", exc_info=True)
+    """Запуск бота"""
+    try:
+        logger.info("Запуск бота...")
+        logger.info("Ожидание сообщений...")
+        # Удаляем webhook если был установлен
+        import asyncio
+        async def delete_webhook():
+            try:
+                await self.app.bot.delete_webhook(drop_pending_updates=True)
+                logger.info("Webhook удален, используется polling")
+            except Exception as e:
+                logger.warning(f"Не удалось удалить webhook: {e}")
+        
+        asyncio.run(delete_webhook())
+        
+        self.app.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+            close_loop=False
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при запуске бота: {e}", exc_info=True)
+        # Если конфликт - ждем и перезапускаем
+        if "Conflict" in str(e):
+            logger.warning("Обнаружен конфликт с другим экземпляром бота. Ожидание 10 секунд...")
+            import time
+            time.sleep(10)
+            logger.info("Повторная попытка запуска...")
+            self.app.run_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+                close_loop=False
+            )
+        else:
             raise
 
 
