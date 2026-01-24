@@ -251,18 +251,10 @@ class CoffeeBot:
             file = await context.bot.get_file(photo.file_id)
             photo_bytes = await file.download_as_bytearray()
             
-            # Extract text using OCR (lazy initialization - models download on first use)
+            # Extract text using OCR (optional - if not available, user fills form manually)
             extracted_data = {}
-            if OCR_AVAILABLE:
+            if OCR_AVAILABLE and self.ocr_reader:
                 try:
-                    # Initialize OCR reader on first use (not during startup to avoid build timeout)
-                    if not self._ocr_initialized:
-                        await update.message.reply_text("📥 Downloading OCR models (first time only, ~2-3 min)...")
-                        logger.info("Initializing EasyOCR (lazy load)...")
-                        self.ocr_reader = easyocr.Reader(['en'], gpu=False)
-                        self._ocr_initialized = True
-                        logger.info("EasyOCR initialized successfully")
-                    
                     # Use EasyOCR to extract text
                     await update.message.reply_text("🔍 Analyzing photo...")
                     results = self.ocr_reader.readtext(photo_bytes)
