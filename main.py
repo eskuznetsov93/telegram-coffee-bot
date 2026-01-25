@@ -1,7 +1,6 @@
 # логика бота
 import logging
 import os
-import sys
 import time
 import requests
 import re
@@ -232,14 +231,8 @@ class CoffeeBot:
             stars = self._rating_to_stars(item['max_rating'])
             roaster = item['roaster'] if item['roaster'] else "Not specified"
             processing = item['processing'] if item['processing'] else "Not specified"
-            # Format Q-grader for display
-            if item['q_grade'] is None:
-                q_grade_text = "Q: No"
-            elif item['q_grade'] == 91:
-                q_grade_text = "Q: 90+"
-            else:
-                q_grade_text = f"Q: {item['q_grade']}"
-            message_parts.append(f"{i}. {item['country']} | {item['plantation']} | {processing} | {roaster} | {q_grade_text} — {stars}")
+            # Q-grade не показывается, так как не учитывается при группировке
+            message_parts.append(f"{i}. {item['country']} | {item['plantation']} | {processing} | {roaster} — {stars}")
         
         message = "\n".join(message_parts)
         await update.message.reply_text(message)
@@ -258,17 +251,11 @@ class CoffeeBot:
             stars = self._rating_to_stars(int(avg_rating) if avg_rating else None)
             roaster = item['roaster'] if item['roaster'] else "Not specified"
             processing = item['processing'] if item['processing'] else "Not specified"
-            # Format Q-grader for display
-            if item['q_grade'] is None:
-                q_grade_text = "Q: No"
-            elif item['q_grade'] == 91:
-                q_grade_text = "Q: 90+"
-            else:
-                q_grade_text = f"Q: {item['q_grade']}"
+            # Q-grade не показывается, так как не учитывается при группировке
             
             rating_text = f"{avg_rating:.2f}" if avg_rating else "—"
             message_parts.append(
-                f"{i}. {item['country']} | {item['plantation']} | {processing} | {roaster} | {q_grade_text} — {stars} (avg: {rating_text}, {item['count']} ratings)"
+                f"{i}. {item['country']} | {item['plantation']} | {processing} | {roaster} — {stars} (avg: {rating_text}, {item['count']} ratings)"
             )
         
         message = "\n".join(message_parts)
@@ -796,6 +783,8 @@ class CoffeeBot:
             [InlineKeyboardButton("Washed", callback_data="processing_Washed")],
             [InlineKeyboardButton("Natural", callback_data="processing_Natural")],
             [InlineKeyboardButton("Anaerobic", callback_data="processing_Anaerobic")],
+            [InlineKeyboardButton("Anaerobic Natural", callback_data="processing_Anaerobic Natural")],
+            [InlineKeyboardButton("Anaerobic Washed", callback_data="processing_Anaerobic Washed")],
             [InlineKeyboardButton("Honey", callback_data="processing_Honey")],
             [InlineKeyboardButton("Infused", callback_data="processing_Infused")],
         ]
@@ -1045,6 +1034,8 @@ class CoffeeBot:
             [InlineKeyboardButton("Washed", callback_data="processing_Washed")],
             [InlineKeyboardButton("Natural", callback_data="processing_Natural")],
             [InlineKeyboardButton("Anaerobic", callback_data="processing_Anaerobic")],
+            [InlineKeyboardButton("Anaerobic Natural", callback_data="processing_Anaerobic Natural")],
+            [InlineKeyboardButton("Anaerobic Washed", callback_data="processing_Anaerobic Washed")],
             [InlineKeyboardButton("Honey", callback_data="processing_Honey")],
             [InlineKeyboardButton("Infused", callback_data="processing_Infused")],
         ]
@@ -1085,6 +1076,8 @@ class CoffeeBot:
             [InlineKeyboardButton("Washed", callback_data="processing_Washed")],
             [InlineKeyboardButton("Natural", callback_data="processing_Natural")],
             [InlineKeyboardButton("Anaerobic", callback_data="processing_Anaerobic")],
+            [InlineKeyboardButton("Anaerobic Natural", callback_data="processing_Anaerobic Natural")],
+            [InlineKeyboardButton("Anaerobic Washed", callback_data="processing_Anaerobic Washed")],
             [InlineKeyboardButton("Honey", callback_data="processing_Honey")],
             [InlineKeyboardButton("Infused", callback_data="processing_Infused")],
         ]
@@ -1331,14 +1324,8 @@ class CoffeeBot:
                     stars = self._rating_to_stars(item['max_rating'])
                     roaster = item['roaster'] if item['roaster'] else "Not specified"
                     processing = item['processing'] if item['processing'] else "Not specified"
-                    # Format Q-grader for display
-                    if item['q_grade'] is None:
-                        q_grade_text = "Q: No"
-                    elif item['q_grade'] == 91:
-                        q_grade_text = "Q: 90+"
-                    else:
-                        q_grade_text = f"Q: {item['q_grade']}"
-                    message_parts.append(f"{i}. {item['country']} | {item['plantation']} | {processing} | {roaster} | {q_grade_text} — {stars}")
+                    # Q-grade не показывается, так как не учитывается при группировке
+                    message_parts.append(f"{i}. {item['country']} | {item['plantation']} | {processing} | {roaster} — {stars}")
                 
                 message = "\n".join(message_parts)
                 await update.message.reply_text(f"📋 Your coffee list:\n\n{message}")
@@ -1439,7 +1426,7 @@ if __name__ == "__main__":
             logger.error("TELEGRAM_BOT_TOKEN not found in environment variables!")
             print("ERROR: TELEGRAM_BOT_TOKEN not found in environment variables!")
             print("Make sure the .env file exists and contains TELEGRAM_BOT_TOKEN")
-            sys.exit(1)
+            exit(1)
         
         logger.info("Token loaded successfully")
         print("Initializing bot...")
@@ -1452,4 +1439,4 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Critical error: {e}", exc_info=True)
         print(f"ERROR: {e}")
-        sys.exit(1)
+        exit(1)

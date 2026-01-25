@@ -35,7 +35,11 @@ class Database:
             'dak coffee': ['dak coffee', 'dack coffee', 'dak cofee', 'dakcoffee'],
         }
         
+        # Текущая версия схемы БД
+        self.current_schema_version = 2
+        
         self.init_db()
+        self._run_migrations()
     
     def _normalize_name(self, name: str) -> str:
         """Нормализация названия: lowercase, удаление лишних пробелов"""
@@ -184,8 +188,113 @@ class Database:
             )
         """)
         
+        # Индексы для оптимизации запросов
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_coffee_user_id ON coffee(user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_coffee_user_rating ON coffee(user_id, my_rating)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_coffee_grouping ON coffee(plantation, processing, roaster)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_locations_country ON locations(country)")
+        
         conn.commit()
         conn.close()
+    
+    def _get_current_schema_version(self) -> int:
+        """Получить текущую версию схемы БД"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # Проверяем, существует ли таблица schema_migrations
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'")
+            if not cursor.fetchone():
+                conn.close()
+                return 0
+            
+            cursor.execute("SELECT MAX(version) FROM schema_migrations")
+            result = cursor.fetchone()
+            version = result[0] if result[0] is not None else 0
+        except sqlite3.OperationalError:
+            version = 0
+        
+        conn.close()
+        return version
+    
+    def _apply_migration(self, version: int, description: str, migration_sql: List[str]):
+        """Применить миграцию"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # Применяем SQL миграции
+            for sql in migration_sql:
+                cursor.execute(sql)
+            
+            # Записываем версию миграции
+            cursor.execute("""
+                INSERT INTO schema_migrations (version, description)
+                VALUES (?, ?)
+            """, (version, description))
+            
+            conn.commit()
+            logger.info(f"✓ Migration {version} applied: {description}")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"✗ Error applying migration {version}: {e}", exc_info=True)
+            raise
+        finally:
+            conn.close()
+    
+    def _run_migrations(self):
+        """Применить все необходимые миграции"""
+        # Создаем таблицу для отслеживания миграций, если её нет
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                description TEXT
+            )
+        """)
+        conn.commit()
+        conn.close()
+        
+        current_version = self._get_current_schema_version()
+        
+        if current_version >= self.current_schema_version:
+            logger.info(f"Database schema is up to date (version {current_version})")
+            return
+        
+        logger.info(f"Current schema version: {current_version}, target: {self.current_schema_version}")
+        
+        # Миграция 1: Базовая схема (уже создана в init_db, просто отмечаем версию)
+        if current_version < 1:
+            # Проверяем, что все таблицы существуют
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Проверяем наличие всех необходимых колонок в таблице coffee
+            cursor.execute("PRAGMA table_info(coffee)")
+            columns = {row[1] for row in cursor.fetchall()}
+            required_columns = {'id', 'user_id', 'country', 'plantation', 'processing', 'roaster', 'q_grade', 'my_rating', 'created_at'}
+            
+            if not required_columns.issubset(columns):
+                logger.warning("Coffee table is missing columns, but will be created by init_db")
+            
+            conn.close()
+            
+            self._apply_migration(1, "Initial schema: coffee and locations tables", [])
+        
+        # Миграция 2: Добавление индексов для оптимизации
+        if current_version < 2:
+            migration_sql = [
+                "CREATE INDEX IF NOT EXISTS idx_coffee_user_id ON coffee(user_id)",
+                "CREATE INDEX IF NOT EXISTS idx_coffee_user_rating ON coffee(user_id, my_rating)",
+                "CREATE INDEX IF NOT EXISTS idx_coffee_grouping ON coffee(plantation, processing, roaster)",
+                "CREATE INDEX IF NOT EXISTS idx_locations_country ON locations(country)",
+            ]
+            self._apply_migration(2, "Add indexes for query optimization", migration_sql)
+        
+        logger.info(f"✓ Database migrations completed. Schema version: {self.current_schema_version}")
     
     def add_coffee(self, coffee: Coffee) -> int:
         """Добавление кофе в базу данных"""
@@ -389,21 +498,20 @@ class Database:
         return [row[0] for row in rows] if rows else []
     
     def get_grouped_coffee_by_user(self, user_id: int) -> List[dict]:
-        """Получение кофе пользователя, сгруппированных по plantation+processing+q_grade+roaster, отсортированных по рейтингу"""
+        """Получение кофе пользователя, сгруппированных по plantation+processing+roaster (без q_grade), отсортированных по рейтингу"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
             SELECT 
                 plantation,
                 processing,
-                q_grade,
                 roaster,
                 country,
                 MAX(my_rating) as max_rating,
                 COUNT(*) as count
             FROM coffee
             WHERE user_id = ?
-            GROUP BY plantation, processing, q_grade, roaster
+            GROUP BY plantation, processing, roaster
             ORDER BY max_rating DESC, count DESC
         """, (user_id,))
         rows = cursor.fetchall()
@@ -414,11 +522,11 @@ class Database:
             result.append({
                 'plantation': row[0],
                 'processing': row[1],
-                'q_grade': row[2],
-                'roaster': row[3],
-                'country': row[4],
-                'max_rating': row[5],
-                'count': row[6]
+                'q_grade': None,  # Не показываем q_grade в группировке
+                'roaster': row[2],
+                'country': row[3],
+                'max_rating': row[4],
+                'count': row[5]
             })
         return result
     
@@ -473,14 +581,14 @@ class Database:
             norm_plantation = plantation_groups.get(plantation, plantation) if plantation else ""
             norm_roaster = roaster_groups.get(roaster, roaster) if roaster else ""
             
-            # Используем нормализованные значения как ключ группы
-            group_key = (norm_plantation, processing, q_grade, norm_roaster)
+            # Используем нормализованные значения как ключ группы (БЕЗ q_grade - игнорируем разные оценки Q-грейдера)
+            group_key = (norm_plantation, processing, norm_roaster)
             
             if group_key not in grouped:
                 grouped[group_key] = {
                     'plantation': norm_plantation,
                     'processing': processing,
-                    'q_grade': q_grade,
+                    'q_grade': None,  # Не показываем q_grade в группировке
                     'roaster': norm_roaster,
                     'country': country,  # Берем первую встретившуюся страну
                     'ratings': [],
