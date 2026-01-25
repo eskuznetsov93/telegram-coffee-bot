@@ -54,28 +54,60 @@ class CoffeeBot:
             logger.warning("OCR API key not set; skipping OCR.")
             return None
         try:
+            # Compress image if too large
+            from PIL import Image
+            import io
+            try:
+                img = Image.open(io.BytesIO(image_bytes))
+                # Resize if too large (max 2000px on longest side)
+                max_size = 2000
+                if max(img.size) > max_size:
+                    ratio = max_size / max(img.size)
+                    new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
+                    img = img.resize(new_size, Image.Resampling.LANCZOS)
+                
+                # Convert to bytes
+                output = io.BytesIO()
+                img.save(output, format='JPEG', quality=85, optimize=True)
+                image_bytes = output.getvalue()
+            except Exception as e:
+                logger.warning(f"Image compression failed, using original: {e}")
+            
             response = requests.post(
                 OCR_API_URL,
-                files={"file": ("image.jpg", image_bytes)},
+                files={"file": ("image.jpg", image_bytes, "image/jpeg")},
                 data={
                     "apikey": api_key,
                     "language": "eng",
                     "scale": "true",
+                    "OCREngine": "2",  # Use engine 2 for better accuracy
                 },
-                timeout=15,
+                timeout=30,  # Increased timeout
             )
             response.raise_for_status()
             data = response.json()
             if data.get("IsErroredOnProcessing"):
-                logger.warning(f"OCR API error: {data.get('ErrorMessage')}")
+                error_msg = data.get('ErrorMessage', 'Unknown error')
+                logger.warning(f"OCR API error: {error_msg}")
                 return None
             results = data.get("ParsedResults")
             if not results:
+                logger.warning("OCR API returned no results")
                 return None
             # Concatenate all parsed text parts
-            return " ".join((r.get("ParsedText", "") or "") for r in results)
-        except Exception as e:
+            text = " ".join((r.get("ParsedText", "") or "") for r in results)
+            if not text.strip():
+                logger.warning("OCR API returned empty text")
+                return None
+            return text
+        except requests.exceptions.Timeout:
+            logger.error("OCR API request timeout")
+            return None
+        except requests.exceptions.RequestException as e:
             logger.error(f"OCR API request failed: {e}", exc_info=True)
+            return None
+        except Exception as e:
+            logger.error(f"OCR API unexpected error: {e}", exc_info=True)
             return None
     
     def _setup_handlers(self):
@@ -306,10 +338,6 @@ class CoffeeBot:
                 reply_markup=reply_markup
             )
             
-            # Store flag to indicate we're in database data confirmation
-            context.user_data['db_data_confirmation'] = True
-            return CONFIRM_COUNTRY
-            
             # Fill context with database data (mark as extracted for confirmation)
             if existing_coffee.get('country'):
                 context.user_data['country'] = existing_coffee['country']
@@ -327,18 +355,40 @@ class CoffeeBot:
                 context.user_data['q_grade'] = existing_coffee['q_grade']
                 context.user_data['q_grade_extracted'] = True
             
-            # Start confirmation flow
-            return await self._start_confirmation_flow(update, context)
+            # Store flag to indicate we're in database data confirmation
+            context.user_data['db_data_confirmation'] = True
+            return CONFIRM_COUNTRY
         
         # Photo not found in database - try OCR
+        extracted_data = {}
         try:
-            # Download photo
-            file = await context.bot.get_file(photo.file_id)
-            photo_bytes = await file.download_as_bytearray()
+            # Download photo with timeout
+            try:
+                file = await context.bot.get_file(photo.file_id)
+                # Use asyncio.wait_for for timeout on download
+                import asyncio
+                photo_bytes = await asyncio.wait_for(
+                    file.download_as_bytearray(),
+                    timeout=30.0
+                )
+            except asyncio.TimeoutError:
+                logger.error("Photo download timeout")
+                await update.message.reply_text("⚠️ Photo download timeout. Please try again or fill the form manually.")
+                return await self._start_confirmation_flow(update, context)
+            except Exception as e:
+                logger.error(f"Photo download error: {e}", exc_info=True)
+                await update.message.reply_text("⚠️ Error downloading photo. Please fill the form manually.")
+                return await self._start_confirmation_flow(update, context)
             
             # Extract text using external OCR API (fast, no heavy libs in build)
-            extracted_data = {}
-            full_text = self._call_ocr_api(photo_bytes)
+            # Run OCR in executor to avoid blocking
+            import asyncio
+            loop = asyncio.get_event_loop()
+            full_text = await loop.run_in_executor(
+                None,
+                self._call_ocr_api,
+                photo_bytes
+            )
             
             if full_text:
                 try:
