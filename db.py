@@ -10,9 +10,24 @@ logger = logging.getLogger(__name__)
 
 
 class Database:
-    def __init__(self, db_path: str = "coffee.db"):
-        """Инициализация базы данных"""
+    def __init__(self, db_path: str = None):
+        """Инициализация базы данных
+        Если db_path не указан, использует переменную окружения DB_PATH или по умолчанию coffee.db
+        На Railway рекомендуется использовать Volume и установить DB_PATH=/data/coffee.db"""
+        import os
+        if db_path is None:
+            db_path = os.getenv("DB_PATH", "coffee.db")
         self.db_path = db_path
+        
+        # Создаем директорию для базы данных, если её нет (для Railway Volume)
+        if "/" in self.db_path:
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir and not os.path.exists(db_dir):
+                try:
+                    os.makedirs(db_dir, exist_ok=True)
+                    logger.info(f"Created database directory: {db_dir}")
+                except Exception as e:
+                    logger.warning(f"Could not create database directory {db_dir}: {e}")
         
         # Словарь типичных ошибок в написании (правильное -> варианты с ошибками)
         # Ключ - правильное написание, значение - список вариантов с ошибками
