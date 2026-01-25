@@ -88,6 +88,18 @@ class CoffeeBot:
                     MessageHandler(filters.PHOTO, self.get_photo),
                     MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex("^(Skip|skip|SKIP)$"), self.skip_photo)
                 ],
+                CONFIRM_COUNTRY: [
+                    CallbackQueryHandler(self.confirm_country, pattern="^confirm_country_(yes|no)$")
+                ],
+                CONFIRM_PLANTATION: [
+                    CallbackQueryHandler(self.confirm_plantation, pattern="^confirm_plantation_(yes|no)$")
+                ],
+                CONFIRM_PROCESSING: [
+                    CallbackQueryHandler(self.confirm_processing, pattern="^confirm_processing_(yes|no)$")
+                ],
+                CONFIRM_ROASTER: [
+                    CallbackQueryHandler(self.confirm_roaster, pattern="^confirm_roaster_(yes|no)$")
+                ],
                 COUNTRY: [
                     CallbackQueryHandler(self.get_country_callback, pattern="^country_"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.get_country)
