@@ -392,18 +392,29 @@ class CoffeeBot:
                 )
         
         # Fill context with extracted data (mark as extracted for confirmation)
+        # Log what we're saving for debugging
+        logger.info(f"Extracted data from OCR: {extracted_data}")
+        
         if extracted_data.get('country'):
             context.user_data['country'] = extracted_data['country']
             context.user_data['country_extracted'] = True
+            logger.info(f"Saved country: {extracted_data['country']}")
         if extracted_data.get('plantation'):
             context.user_data['plantation'] = extracted_data['plantation']
             context.user_data['plantation_extracted'] = True
+            logger.info(f"Saved plantation: {extracted_data['plantation']}")
         if extracted_data.get('processing'):
             context.user_data['processing'] = extracted_data['processing']
             context.user_data['processing_extracted'] = True
+            logger.info(f"Saved processing: {extracted_data['processing']}")
         if extracted_data.get('roaster'):
             context.user_data['roaster'] = extracted_data['roaster']
             context.user_data['roaster_extracted'] = True
+            logger.info(f"Saved roaster: {extracted_data['roaster']}")
+        
+        # Log final state
+        logger.info(f"Context after OCR: country={context.user_data.get('country')}, plantation={context.user_data.get('plantation')}, processing={context.user_data.get('processing')}, roaster={context.user_data.get('roaster')}")
+        logger.info(f"Extracted flags: country={context.user_data.get('country_extracted')}, plantation={context.user_data.get('plantation_extracted')}, processing={context.user_data.get('processing_extracted')}, roaster={context.user_data.get('roaster_extracted')}")
         
         # Start confirmation flow for extracted data
         return await self._start_confirmation_flow(update, context)
@@ -521,18 +532,24 @@ class CoffeeBot:
         else:
             # Processing confirmed, check roaster
             context.user_data.pop('processing_extracted', None)
-            if context.user_data.get('roaster_extracted'):
-                roaster = context.user_data.get('roaster')
+            processing = context.user_data.get('processing', '')
+            await query.edit_message_text(f"Processing: {processing}")
+            
+            # Check if roaster was extracted - log for debugging
+            roaster = context.user_data.get('roaster')
+            roaster_extracted = context.user_data.get('roaster_extracted')
+            logger.info(f"After processing confirmation: roaster={roaster}, roaster_extracted={roaster_extracted}, all context keys: {list(context.user_data.keys())}")
+            
+            if roaster_extracted and roaster:
                 keyboard = [
                     [InlineKeyboardButton("✅ Yes", callback_data="confirm_roaster_yes")],
                     [InlineKeyboardButton("❌ No", callback_data="confirm_roaster_no")]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
-                await query.edit_message_text(f"Processing: {context.user_data.get('processing')}")
                 await query.message.reply_text(f"Roaster: {roaster}\n\nCorrect?", reply_markup=reply_markup)
                 return CONFIRM_ROASTER
             else:
-                await query.edit_message_text(f"Processing: {context.user_data.get('processing')}")
+                logger.info(f"No roaster extracted, going to manual input. roaster={roaster}, roaster_extracted={roaster_extracted}")
                 from telegram import Update as UpdateType
                 fake_update = UpdateType(update_id=0, message=query.message)
                 return await self._continue_to_roaster(fake_update, context)
@@ -626,9 +643,8 @@ class CoffeeBot:
             # Should not happen, but fallback
             return await self._continue_to_country(update, context)
         
-        # Clear any extracted plantation data if we're doing manual input
-        if not context.user_data.get('plantation_extracted'):
-            context.user_data.pop('plantation', None)
+        # Don't clear plantation data here - preserve it for user to see/confirm
+        # Only clear if user explicitly rejected it
         
         plantations = self.db.get_plantations_by_country(country)
         
@@ -653,9 +669,8 @@ class CoffeeBot:
         # Get message object (could be from Update or Message)
         message = update.message if hasattr(update, 'message') and update.message else update
         
-        # Clear any extracted processing data if we're doing manual input
-        if not context.user_data.get('processing_extracted'):
-            context.user_data.pop('processing', None)
+        # Don't clear processing data here - preserve it for user to see/confirm
+        # Only clear if user explicitly rejected it
         
         keyboard = [
             [InlineKeyboardButton("Washed", callback_data="processing_Washed")],
@@ -674,9 +689,11 @@ class CoffeeBot:
         # Get message object (could be from Update or Message)
         message = update.message if hasattr(update, 'message') and update.message else update
         
-        # Clear any extracted roaster data if we're doing manual input
-        if not context.user_data.get('roaster_extracted'):
-            context.user_data.pop('roaster', None)
+        # Don't clear roaster data here - it should be preserved
+        # Only clear if user explicitly rejected it (in confirm_roaster_no)
+        roaster = context.user_data.get('roaster')
+        roaster_extracted = context.user_data.get('roaster_extracted')
+        logger.info(f"_continue_to_roaster: roaster={roaster}, roaster_extracted={roaster_extracted}")
         
         roasters = self.db.get_all_roasters()
         
@@ -763,6 +780,26 @@ class CoffeeBot:
                     result['roaster'] = roaster
                     break
         
+        # If roaster not found by patterns, try to find standalone words that might be roaster
+        # Look for words that appear after plantation and before processing/end
+        if 'roaster' not in result:
+            # Try to find words that look like brand names (all caps, 2-4 words)
+            # This is a fallback for cases like "DAK COFFEE"
+            words = text_upper.split()
+            # Look for sequences of 2-4 capitalized words that aren't countries or processing
+            for i in range(len(words) - 1):
+                potential_roaster = ' '.join(words[i:i+2])
+                if (len(potential_roaster) >= 3 and 
+                    potential_roaster not in countries and 
+                    potential_roaster not in processing_types and
+                    not any(p in potential_roaster for p in ['PROCESS', 'ROAST', 'COFFEE', 'FROM', 'FINCA'])):
+                    # Check if it's not already found as plantation
+                    if potential_roaster != result.get('plantation', '').upper():
+                        result['roaster'] = ' '.join(text.split()[i:i+2])  # Use original case
+                        logger.info(f"Found roaster by fallback pattern: {result['roaster']}")
+                        break
+        
+        logger.info(f"Parsed coffee info: {result}")
         return result
     
     async def get_country_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
