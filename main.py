@@ -412,9 +412,12 @@ class CoffeeBot:
             context.user_data['roaster_extracted'] = True
             logger.info(f"Saved roaster: {extracted_data['roaster']}")
         
-        # Log final state
+        # Log final state - CRITICAL: Verify roaster is saved
+        logger.info(f"=== OCR COMPLETE ===")
         logger.info(f"Context after OCR: country={context.user_data.get('country')}, plantation={context.user_data.get('plantation')}, processing={context.user_data.get('processing')}, roaster={context.user_data.get('roaster')}")
         logger.info(f"Extracted flags: country={context.user_data.get('country_extracted')}, plantation={context.user_data.get('plantation_extracted')}, processing={context.user_data.get('processing_extracted')}, roaster={context.user_data.get('roaster_extracted')}")
+        logger.info(f"Full context keys: {list(context.user_data.keys())}")
+        logger.info(f"Full context data: {dict((k, v) for k, v in context.user_data.items())}")
         
         # Start confirmation flow for extracted data
         return await self._start_confirmation_flow(update, context)
@@ -426,6 +429,14 @@ class CoffeeBot:
     
     async def _start_confirmation_flow(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start confirmation flow for extracted data or go to manual input"""
+        # CRITICAL: Log all data before starting confirmation flow
+        logger.info(f"=== STARTING CONFIRMATION FLOW ===")
+        logger.info(f"country={context.user_data.get('country')}, country_extracted={context.user_data.get('country_extracted')}")
+        logger.info(f"plantation={context.user_data.get('plantation')}, plantation_extracted={context.user_data.get('plantation_extracted')}")
+        logger.info(f"processing={context.user_data.get('processing')}, processing_extracted={context.user_data.get('processing_extracted')}")
+        logger.info(f"roaster={context.user_data.get('roaster')}, roaster_extracted={context.user_data.get('roaster_extracted')}")
+        logger.info(f"Full context: {dict(context.user_data)}")
+        
         # Check country first
         if context.user_data.get('country_extracted'):
             country = context.user_data.get('country')
@@ -460,7 +471,15 @@ class CoffeeBot:
             return await self._continue_to_country(fake_update, context)
         else:
             # Country confirmed, check plantation
+            # IMPORTANT: Only remove country_extracted flag, DO NOT touch roaster, processing, or plantation data!
             context.user_data.pop('country_extracted', None)
+            
+            # Log roaster data to ensure it's preserved
+            roaster = context.user_data.get('roaster')
+            roaster_extracted = context.user_data.get('roaster_extracted')
+            logger.info(f"=== Country confirmed ===")
+            logger.info(f"roaster={roaster}, roaster_extracted={roaster_extracted}")
+            
             if context.user_data.get('plantation_extracted'):
                 plantation = context.user_data.get('plantation')
                 keyboard = [
@@ -496,9 +515,16 @@ class CoffeeBot:
             return await self._continue_to_plantation(fake_update, context)
         else:
             # Plantation confirmed, check processing
+            # IMPORTANT: Only remove plantation_extracted flag, DO NOT touch roaster or processing data!
             context.user_data.pop('plantation_extracted', None)
             plantation = context.user_data.get('plantation', '')
             await query.edit_message_text(f"Plantation: {plantation}")
+            
+            # Log roaster data to ensure it's preserved
+            roaster = context.user_data.get('roaster')
+            roaster_extracted = context.user_data.get('roaster_extracted')
+            logger.info(f"=== Plantation confirmed ===")
+            logger.info(f"roaster={roaster}, roaster_extracted={roaster_extracted}")
             
             if context.user_data.get('processing_extracted'):
                 processing = context.user_data.get('processing')
@@ -531,16 +557,26 @@ class CoffeeBot:
             return await self._continue_to_processing(fake_update, context)
         else:
             # Processing confirmed, check roaster
+            # IMPORTANT: Only remove processing_extracted flag, DO NOT touch roaster data!
             context.user_data.pop('processing_extracted', None)
             processing = context.user_data.get('processing', '')
             await query.edit_message_text(f"Processing: {processing}")
             
             # Check if roaster was extracted - log for debugging
+            # Get roaster data BEFORE any operations
             roaster = context.user_data.get('roaster')
             roaster_extracted = context.user_data.get('roaster_extracted')
-            logger.info(f"After processing confirmation: roaster={roaster}, roaster_extracted={roaster_extracted}, all context keys: {list(context.user_data.keys())}")
             
+            # Log all context data for debugging
+            logger.info(f"=== Processing confirmed ===")
+            logger.info(f"roaster={roaster}")
+            logger.info(f"roaster_extracted={roaster_extracted}")
+            logger.info(f"All context keys: {list(context.user_data.keys())}")
+            logger.info(f"All context data: {dict((k, v) for k, v in context.user_data.items() if not k.endswith('_extracted') or k == 'roaster_extracted')}")
+            
+            # Check if we have roaster data (either extracted or manually entered)
             if roaster_extracted and roaster:
+                logger.info(f"Roaster found, showing confirmation: {roaster}")
                 keyboard = [
                     [InlineKeyboardButton("✅ Yes", callback_data="confirm_roaster_yes")],
                     [InlineKeyboardButton("❌ No", callback_data="confirm_roaster_no")]
@@ -549,7 +585,10 @@ class CoffeeBot:
                 await query.message.reply_text(f"Roaster: {roaster}\n\nCorrect?", reply_markup=reply_markup)
                 return CONFIRM_ROASTER
             else:
-                logger.info(f"No roaster extracted, going to manual input. roaster={roaster}, roaster_extracted={roaster_extracted}")
+                logger.warning(f"=== NO ROASTER FOUND ===")
+                logger.warning(f"roaster={roaster}")
+                logger.warning(f"roaster_extracted={roaster_extracted}")
+                logger.warning(f"Full context: {dict(context.user_data)}")
                 from telegram import Update as UpdateType
                 fake_update = UpdateType(update_id=0, message=query.message)
                 return await self._continue_to_roaster(fake_update, context)
