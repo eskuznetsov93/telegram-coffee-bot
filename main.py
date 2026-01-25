@@ -6,6 +6,7 @@ import time
 import requests
 import re
 import io
+import asyncio
 from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -82,7 +83,7 @@ class CoffeeBot:
                     "scale": "true",
                     "OCREngine": "2",  # Use engine 2 for better accuracy
                 },
-                timeout=30,  # Increased timeout
+                timeout=(10, 25),  # (connect timeout, read timeout)
             )
             response.raise_for_status()
             data = response.json()
@@ -361,78 +362,87 @@ class CoffeeBot:
         
         # Photo not found in database - try OCR
         extracted_data = {}
+        
+        # Download photo with timeout
         try:
-            # Download photo with timeout
-            try:
-                file = await context.bot.get_file(photo.file_id)
-                # Use asyncio.wait_for for timeout on download
-                import asyncio
-                photo_bytes = await asyncio.wait_for(
-                    file.download_as_bytearray(),
-                    timeout=30.0
-                )
-            except asyncio.TimeoutError:
-                logger.error("Photo download timeout")
-                await update.message.reply_text("⚠️ Photo download timeout. Please try again or fill the form manually.")
-                return await self._start_confirmation_flow(update, context)
-            except Exception as e:
-                logger.error(f"Photo download error: {e}", exc_info=True)
-                await update.message.reply_text("⚠️ Error downloading photo. Please fill the form manually.")
-                return await self._start_confirmation_flow(update, context)
+            logger.info("Starting photo download...")
+            file = await context.bot.get_file(photo.file_id)
+            logger.info("Photo file object obtained, downloading...")
             
-            # Extract text using external OCR API (fast, no heavy libs in build)
-            # Run OCR in executor to avoid blocking
-            import asyncio
-            loop = asyncio.get_event_loop()
-            full_text = await loop.run_in_executor(
-                None,
-                self._call_ocr_api,
-                photo_bytes
+            # Download with timeout
+            photo_bytes = await asyncio.wait_for(
+                file.download_as_bytearray(),
+                timeout=30.0
             )
-            
-            if full_text:
-                try:
-                    extracted_data = self._parse_coffee_info(full_text)
-                    if extracted_data:
-                        await update.message.reply_text(
-                            f"✅ Found information on the package:\n\n"
-                            f"Country: {extracted_data.get('country', 'Not found')}\n"
-                            f"Plantation: {extracted_data.get('plantation', 'Not found')}\n"
-                            f"Processing: {extracted_data.get('processing', 'Not found')}\n"
-                            f"Roaster: {extracted_data.get('roaster', 'Not found')}\n\n"
-                            f"I'll use this information to fill the form. You can edit it if needed."
-                        )
-                    else:
-                        await update.message.reply_text(
-                            "⚠️ Text extracted, but no specific coffee details found. Please fill the form manually."
-                        )
-                except Exception as e:
-                    logger.error(f"OCR parse error: {e}", exc_info=True)
-                    await update.message.reply_text(
-                        "⚠️ Error processing extracted text. Please fill the form manually."
-                    )
-            else:
-                await update.message.reply_text(
-                    "⚠️ OCR failed or not configured. Please fill the form manually."
-                )
-            
-            # Fill context with extracted data (mark as extracted for confirmation)
-            if extracted_data.get('country'):
-                context.user_data['country'] = extracted_data['country']
-                context.user_data['country_extracted'] = True
-            if extracted_data.get('plantation'):
-                context.user_data['plantation'] = extracted_data['plantation']
-                context.user_data['plantation_extracted'] = True
-            if extracted_data.get('processing'):
-                context.user_data['processing'] = extracted_data['processing']
-                context.user_data['processing_extracted'] = True
-            if extracted_data.get('roaster'):
-                context.user_data['roaster'] = extracted_data['roaster']
-                context.user_data['roaster_extracted'] = True
-            
+            logger.info(f"Photo downloaded, size: {len(photo_bytes)} bytes")
+        except asyncio.TimeoutError:
+            logger.error("Photo download timeout")
+            await update.message.reply_text("⚠️ Photo download timeout. Please try again or fill the form manually.")
+            return await self._start_confirmation_flow(update, context)
         except Exception as e:
-            logger.error(f"Error processing photo: {e}", exc_info=True)
-            await update.message.reply_text("⚠️ Error processing photo. Please fill the form manually.")
+            logger.error(f"Photo download error: {e}", exc_info=True)
+            await update.message.reply_text("⚠️ Error downloading photo. Please fill the form manually.")
+            return await self._start_confirmation_flow(update, context)
+        
+        # Extract text using external OCR API
+        try:
+            logger.info("Starting OCR processing...")
+            # Run OCR in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            full_text = await asyncio.wait_for(
+                loop.run_in_executor(None, self._call_ocr_api, photo_bytes),
+                timeout=35.0
+            )
+            logger.info(f"OCR completed, text length: {len(full_text) if full_text else 0}")
+        except asyncio.TimeoutError:
+            logger.error("OCR processing timeout")
+            await update.message.reply_text("⚠️ OCR processing timeout. Please fill the form manually.")
+            return await self._start_confirmation_flow(update, context)
+        except Exception as e:
+            logger.error(f"OCR processing error: {e}", exc_info=True)
+            await update.message.reply_text("⚠️ Error processing photo with OCR. Please fill the form manually.")
+            return await self._start_confirmation_flow(update, context)
+        
+        # Parse extracted text
+        if full_text:
+            try:
+                extracted_data = self._parse_coffee_info(full_text)
+                if extracted_data:
+                    await update.message.reply_text(
+                        f"✅ Found information on the package:\n\n"
+                        f"Country: {extracted_data.get('country', 'Not found')}\n"
+                        f"Plantation: {extracted_data.get('plantation', 'Not found')}\n"
+                        f"Processing: {extracted_data.get('processing', 'Not found')}\n"
+                        f"Roaster: {extracted_data.get('roaster', 'Not found')}\n\n"
+                        f"I'll use this information to fill the form. You can edit it if needed."
+                    )
+                else:
+                    await update.message.reply_text(
+                        "⚠️ Text extracted, but no specific coffee details found. Please fill the form manually."
+                    )
+            except Exception as e:
+                logger.error(f"OCR parse error: {e}", exc_info=True)
+                await update.message.reply_text(
+                    "⚠️ Error processing extracted text. Please fill the form manually."
+                )
+        else:
+            await update.message.reply_text(
+                "⚠️ OCR failed or not configured. Please fill the form manually."
+            )
+        
+        # Fill context with extracted data (mark as extracted for confirmation)
+        if extracted_data.get('country'):
+            context.user_data['country'] = extracted_data['country']
+            context.user_data['country_extracted'] = True
+        if extracted_data.get('plantation'):
+            context.user_data['plantation'] = extracted_data['plantation']
+            context.user_data['plantation_extracted'] = True
+        if extracted_data.get('processing'):
+            context.user_data['processing'] = extracted_data['processing']
+            context.user_data['processing_extracted'] = True
+        if extracted_data.get('roaster'):
+            context.user_data['roaster'] = extracted_data['roaster']
+            context.user_data['roaster_extracted'] = True
         
         # Start confirmation flow for extracted data
         return await self._start_confirmation_flow(update, context)
