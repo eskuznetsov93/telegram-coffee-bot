@@ -56,11 +56,24 @@ class CoffeeBot:
             logger.warning("OCR API key not set; skipping OCR.")
             return None, "OCR API key not configured. Please set OCR_SPACE_API_KEY environment variable."
         try:
-            # Compress image if too large
+            # Process and validate image
             from PIL import Image
             import io
             try:
+                # Open and validate image
                 img = Image.open(io.BytesIO(image_bytes))
+                
+                # Convert to RGB if necessary (for formats like PNG with transparency)
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    # Create white background
+                    rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                    if img.mode == 'P':
+                        img = img.convert('RGBA')
+                    rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                    img = rgb_img
+                elif img.mode != 'RGB':
+                    img = img.convert('RGB')
+                
                 # Resize if too large (max 2000px on longest side)
                 max_size = 2000
                 if max(img.size) > max_size:
@@ -68,12 +81,23 @@ class CoffeeBot:
                     new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
                     img = img.resize(new_size, Image.Resampling.LANCZOS)
                 
-                # Convert to bytes
+                # Convert to JPEG bytes with proper format
                 output = io.BytesIO()
-                img.save(output, format='JPEG', quality=85, optimize=True)
+                img.save(output, format='JPEG', quality=90, optimize=True)
                 image_bytes = output.getvalue()
+                
+                # Validate that we have valid image data
+                if len(image_bytes) < 100:
+                    raise ValueError("Image too small after processing")
+                    
+                logger.info(f"Image processed: size={img.size}, bytes={len(image_bytes)}")
             except Exception as e:
-                logger.warning(f"Image compression failed, using original: {e}")
+                logger.error(f"Image processing failed: {e}", exc_info=True)
+                # Try to use original if processing fails
+                # But validate it's not empty
+                if len(image_bytes) < 100:
+                    return None, f"Image file is too small or corrupted: {str(e)}"
+                logger.warning(f"Using original image after processing error: {e}")
             
             response = requests.post(
                 OCR_API_URL,
