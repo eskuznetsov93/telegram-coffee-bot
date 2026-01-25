@@ -48,12 +48,13 @@ class CoffeeBot:
         self._setup_handlers()
         logger.info("CoffeeBot initialized successfully")
 
-    def _call_ocr_api(self, image_bytes: bytes) -> Optional[str]:
-        """Call external OCR API and return extracted text or None on failure."""
+    def _call_ocr_api(self, image_bytes: bytes) -> tuple[Optional[str], Optional[str]]:
+        """Call external OCR API and return (extracted text, error_message) tuple.
+        Returns (None, None) if no API key, (None, error_msg) on error, (text, None) on success."""
         api_key = os.getenv(OCR_API_KEY_ENV)
         if not api_key:
             logger.warning("OCR API key not set; skipping OCR.")
-            return None
+            return None, "OCR API key not configured. Please set OCR_SPACE_API_KEY environment variable."
         try:
             # Compress image if too large
             from PIL import Image
@@ -90,26 +91,26 @@ class CoffeeBot:
             if data.get("IsErroredOnProcessing"):
                 error_msg = data.get('ErrorMessage', 'Unknown error')
                 logger.warning(f"OCR API error: {error_msg}")
-                return None
+                return None, f"OCR API error: {error_msg}"
             results = data.get("ParsedResults")
             if not results:
                 logger.warning("OCR API returned no results")
-                return None
+                return None, "OCR API returned no results. The image might be too unclear or contain no text."
             # Concatenate all parsed text parts
             text = " ".join((r.get("ParsedText", "") or "") for r in results)
             if not text.strip():
                 logger.warning("OCR API returned empty text")
-                return None
-            return text
+                return None, "OCR API returned empty text. The image might not contain readable text."
+            return text, None
         except requests.exceptions.Timeout:
             logger.error("OCR API request timeout")
-            return None
+            return None, "OCR API request timeout. The image might be too large or the service is slow."
         except requests.exceptions.RequestException as e:
             logger.error(f"OCR API request failed: {e}", exc_info=True)
-            return None
+            return None, f"OCR API request failed: {str(e)}"
         except Exception as e:
             logger.error(f"OCR API unexpected error: {e}", exc_info=True)
-            return None
+            return None, f"Unexpected error during OCR processing: {str(e)}"
     
     def _setup_handlers(self):
         """Настройка обработчиков команд и сообщений"""
@@ -335,11 +336,12 @@ class CoffeeBot:
             logger.info("Starting OCR processing...")
             # Run OCR in executor to avoid blocking
             loop = asyncio.get_event_loop()
-            full_text = await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 loop.run_in_executor(None, self._call_ocr_api, photo_bytes),
                 timeout=35.0
             )
-            logger.info(f"OCR completed, text length: {len(full_text) if full_text else 0}")
+            full_text, error_message = result
+            logger.info(f"OCR completed, text length: {len(full_text) if full_text else 0}, error: {error_message}")
         except asyncio.TimeoutError:
             logger.error("OCR processing timeout")
             await update.message.reply_text("⚠️ OCR processing timeout. Please fill the form manually.")
@@ -347,6 +349,19 @@ class CoffeeBot:
         except Exception as e:
             logger.error(f"OCR processing error: {e}", exc_info=True)
             await update.message.reply_text("⚠️ Error processing photo with OCR. Please fill the form manually.")
+            return await self._start_confirmation_flow(update, context)
+        
+        # Check for errors
+        if error_message:
+            await update.message.reply_text(f"⚠️ {error_message}\n\nPlease fill the form manually.")
+            return await self._start_confirmation_flow(update, context)
+        
+        # If no text and no error, it means API key is not set
+        if not full_text:
+            await update.message.reply_text(
+                "⚠️ OCR is not configured. Please set OCR_SPACE_API_KEY environment variable.\n\n"
+                "Please fill the form manually."
+            )
             return await self._start_confirmation_flow(update, context)
         
         # Parse extracted text
@@ -371,10 +386,6 @@ class CoffeeBot:
                 await update.message.reply_text(
                     "⚠️ Error processing extracted text. Please fill the form manually."
                 )
-        else:
-            await update.message.reply_text(
-                "⚠️ OCR failed or not configured. Please fill the form manually."
-            )
         
         # Fill context with extracted data (mark as extracted for confirmation)
         if extracted_data.get('country'):
