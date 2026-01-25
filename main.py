@@ -89,7 +89,7 @@ class CoffeeBot:
                     MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex("^(Skip|skip|SKIP)$"), self.skip_photo)
                 ],
                 CONFIRM_COUNTRY: [
-                    CallbackQueryHandler(self.confirm_country, pattern="^confirm_country_(yes|no)$")
+                    CallbackQueryHandler(self.confirm_country, pattern="^(confirm_country_|confirm_db_data_)(yes|no)$")
                 ],
                 CONFIRM_PLANTATION: [
                     CallbackQueryHandler(self.confirm_plantation, pattern="^confirm_plantation_(yes|no)$")
@@ -272,8 +272,65 @@ class CoffeeBot:
             return PHOTO
         
         photo = update.message.photo[-1]  # Get highest resolution
+        
+        # Save photo IDs to context
+        context.user_data['photo_file_id'] = photo.file_id
+        context.user_data['photo_file_unique_id'] = photo.file_unique_id
+        
         await update.message.reply_text("📸 Processing photo... This may take a moment.")
         
+        # First, check if we have this photo in database
+        existing_coffee = self.db.find_coffee_by_photo(photo.file_unique_id)
+        
+        if existing_coffee:
+            # Found matching photo - suggest data from database
+            avg_rating = existing_coffee.get('avg_rating')
+            count = existing_coffee.get('count', 0)
+            rating_text = f"{avg_rating:.2f}" if avg_rating else "—"
+            
+            keyboard = [
+                [InlineKeyboardButton("✅ Yes, use this data", callback_data="confirm_db_data_yes")],
+                [InlineKeyboardButton("❌ No, fill manually", callback_data="confirm_db_data_no")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                f"🎯 I found this coffee in the database!\n\n"
+                f"Country: {existing_coffee.get('country', 'Not found')}\n"
+                f"Plantation: {existing_coffee.get('plantation', 'Not found')}\n"
+                f"Processing: {existing_coffee.get('processing', 'Not found')}\n"
+                f"Roaster: {existing_coffee.get('roaster', 'Not found')}\n"
+                f"Q-grade: {existing_coffee.get('q_grade') if existing_coffee.get('q_grade') is not None else 'No'}\n"
+                f"Average rating: {rating_text} ({count} ratings)\n\n"
+                f"Should I use this information?",
+                reply_markup=reply_markup
+            )
+            
+            # Store flag to indicate we're in database data confirmation
+            context.user_data['db_data_confirmation'] = True
+            return CONFIRM_COUNTRY
+            
+            # Fill context with database data (mark as extracted for confirmation)
+            if existing_coffee.get('country'):
+                context.user_data['country'] = existing_coffee['country']
+                context.user_data['country_extracted'] = True
+            if existing_coffee.get('plantation'):
+                context.user_data['plantation'] = existing_coffee['plantation']
+                context.user_data['plantation_extracted'] = True
+            if existing_coffee.get('processing'):
+                context.user_data['processing'] = existing_coffee['processing']
+                context.user_data['processing_extracted'] = True
+            if existing_coffee.get('roaster'):
+                context.user_data['roaster'] = existing_coffee['roaster']
+                context.user_data['roaster_extracted'] = True
+            if existing_coffee.get('q_grade') is not None:
+                context.user_data['q_grade'] = existing_coffee['q_grade']
+                context.user_data['q_grade_extracted'] = True
+            
+            # Start confirmation flow
+            return await self._start_confirmation_flow(update, context)
+        
+        # Photo not found in database - try OCR
         try:
             # Download photo
             file = await context.bot.get_file(photo.file_id)
@@ -354,6 +411,59 @@ class CoffeeBot:
         """Handle country confirmation"""
         query = update.callback_query
         await query.answer()
+        
+        # Check if this is database data confirmation
+        if query.data == "confirm_db_data_yes":
+            # User confirmed database data - skip all confirmations and go to rating
+            context.user_data.pop('db_data_confirmation', None)
+            context.user_data.pop('country_extracted', None)
+            context.user_data.pop('plantation_extracted', None)
+            context.user_data.pop('processing_extracted', None)
+            context.user_data.pop('roaster_extracted', None)
+            context.user_data.pop('q_grade_extracted', None)
+            
+            # Show summary
+            country = context.user_data.get('country', '')
+            plantation = context.user_data.get('plantation', '')
+            processing = context.user_data.get('processing', '')
+            roaster = context.user_data.get('roaster', '')
+            q_grade = context.user_data.get('q_grade')
+            if q_grade is None:
+                q_grade_display = "No"
+            elif q_grade == 91:
+                q_grade_display = "90+"
+            else:
+                q_grade_display = str(q_grade)
+            
+            await query.edit_message_text(
+                f"✅ Using data from database:\n\n"
+                f"Country: {country}\n"
+                f"Plantation: {plantation}\n"
+                f"Processing: {processing}\n"
+                f"Roaster: {roaster}\n"
+                f"Q-grade: {q_grade_display}"
+            )
+            await query.message.reply_text("Your rating (1–5)")
+            return MY_RATING
+        
+        if query.data == "confirm_db_data_no":
+            # User wants to fill manually - clear all extracted data
+            context.user_data.pop('db_data_confirmation', None)
+            context.user_data.pop('country', None)
+            context.user_data.pop('country_extracted', None)
+            context.user_data.pop('plantation', None)
+            context.user_data.pop('plantation_extracted', None)
+            context.user_data.pop('processing', None)
+            context.user_data.pop('processing_extracted', None)
+            context.user_data.pop('roaster', None)
+            context.user_data.pop('roaster_extracted', None)
+            context.user_data.pop('q_grade', None)
+            context.user_data.pop('q_grade_extracted', None)
+            
+            await query.edit_message_text("I'll help you fill the form manually.")
+            from telegram import Update as UpdateType
+            fake_update = UpdateType(update_id=0, message=query.message)
+            return await self._continue_to_country(fake_update, context)
         
         if query.data == "confirm_country_no":
             # User wants to enter country manually - clear all extracted data
@@ -473,9 +583,23 @@ class CoffeeBot:
             fake_update = UpdateType(update_id=0, message=query.message)
             return await self._continue_to_roaster(fake_update, context)
         else:
-            # Roaster confirmed, go to Q-grade
+            # Roaster confirmed, check Q-grade
             context.user_data.pop('roaster_extracted', None)
             await query.edit_message_text(f"Roaster: {context.user_data.get('roaster')}")
+            
+            # If Q-grade was extracted from database, skip to rating
+            if context.user_data.get('q_grade_extracted'):
+                q_grade = context.user_data.get('q_grade')
+                if q_grade is None:
+                    q_grade_display = "No"
+                elif q_grade == 91:
+                    q_grade_display = "90+"
+                else:
+                    q_grade_display = str(q_grade)
+                await query.message.reply_text(f"Q-grader score: {q_grade_display}")
+                context.user_data.pop('q_grade_extracted', None)
+                await query.message.reply_text("Your rating (1–5)")
+                return MY_RATING
             
             # Create buttons for Q-grade selection
             keyboard = [
@@ -946,7 +1070,9 @@ class CoffeeBot:
                 roaster=roaster,
                 q_grade=context.user_data.get('q_grade'),
                 my_rating=rating,
-                created_at=datetime.now()
+                created_at=datetime.now(),
+                photo_file_id=context.user_data.get('photo_file_id'),
+                photo_file_unique_id=context.user_data.get('photo_file_unique_id')
             )
             
             # Save to database

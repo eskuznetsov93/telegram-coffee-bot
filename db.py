@@ -30,8 +30,27 @@ class Database:
                 roaster TEXT NOT NULL,
                 q_grade INTEGER,
                 my_rating INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                photo_file_id TEXT,
+                photo_file_unique_id TEXT
             )
+        """)
+        
+        # Добавляем колонки для фото, если их нет (для существующих БД)
+        try:
+            cursor.execute("ALTER TABLE coffee ADD COLUMN photo_file_id TEXT")
+        except sqlite3.OperationalError:
+            pass  # Колонка уже существует
+        
+        try:
+            cursor.execute("ALTER TABLE coffee ADD COLUMN photo_file_unique_id TEXT")
+        except sqlite3.OperationalError:
+            pass  # Колонка уже существует
+        
+        # Индекс для быстрого поиска по photo_file_unique_id
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_photo_unique_id 
+            ON coffee(photo_file_unique_id)
         """)
         
         # Таблица для хранения уникальных комбинаций страна-плантация
@@ -53,8 +72,8 @@ class Database:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO coffee (user_id, country, plantation, processing, roaster, q_grade, my_rating, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO coffee (user_id, country, plantation, processing, roaster, q_grade, my_rating, created_at, photo_file_id, photo_file_unique_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             coffee.user_id,
             coffee.country,
@@ -63,7 +82,9 @@ class Database:
             coffee.roaster,
             coffee.q_grade,
             coffee.my_rating,
-            coffee.created_at
+            coffee.created_at,
+            coffee.photo_file_id,
+            coffee.photo_file_unique_id
         ))
         coffee_id = cursor.lastrowid
         conn.commit()
@@ -86,7 +107,7 @@ class Database:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, user_id, country, plantation, processing, roaster, q_grade, my_rating, created_at
+            SELECT id, user_id, country, plantation, processing, roaster, q_grade, my_rating, created_at, photo_file_id, photo_file_unique_id
             FROM coffee
             WHERE user_id = ?
             ORDER BY created_at DESC
@@ -105,7 +126,9 @@ class Database:
                 roaster=row[5],
                 q_grade=row[6],
                 my_rating=row[7],
-                created_at=datetime.fromisoformat(row[8]) if row[8] else None
+                created_at=datetime.fromisoformat(row[8]) if row[8] else None,
+                photo_file_id=row[9] if len(row) > 9 else None,
+                photo_file_unique_id=row[10] if len(row) > 10 else None
             )
             coffee_list.append(coffee)
         return coffee_list
@@ -115,7 +138,7 @@ class Database:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, user_id, country, plantation, processing, roaster, q_grade, my_rating, created_at
+            SELECT id, user_id, country, plantation, processing, roaster, q_grade, my_rating, created_at, photo_file_id, photo_file_unique_id
             FROM coffee
             WHERE id = ?
         """, (coffee_id,))
@@ -132,7 +155,9 @@ class Database:
                 roaster=row[5],
                 q_grade=row[6],
                 my_rating=row[7],
-                created_at=datetime.fromisoformat(row[8]) if row[8] else None
+                created_at=datetime.fromisoformat(row[8]) if row[8] else None,
+                photo_file_id=row[9] if len(row) > 9 else None,
+                photo_file_unique_id=row[10] if len(row) > 10 else None
             )
         return None
     
@@ -141,7 +166,7 @@ class Database:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, user_id, country, plantation, processing, roaster, q_grade, my_rating, created_at
+            SELECT id, user_id, country, plantation, processing, roaster, q_grade, my_rating, created_at, photo_file_id, photo_file_unique_id
             FROM coffee
             WHERE user_id = ?
             ORDER BY my_rating DESC, created_at DESC
@@ -160,7 +185,9 @@ class Database:
                 roaster=row[5],
                 q_grade=row[6],
                 my_rating=row[7],
-                created_at=datetime.fromisoformat(row[8]) if row[8] else None
+                created_at=datetime.fromisoformat(row[8]) if row[8] else None,
+                photo_file_id=row[9] if len(row) > 9 else None,
+                photo_file_unique_id=row[10] if len(row) > 10 else None
             )
             coffee_list.append(coffee)
         return coffee_list
@@ -170,7 +197,7 @@ class Database:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, user_id, country, plantation, processing, roaster, q_grade, my_rating, created_at
+            SELECT id, user_id, country, plantation, processing, roaster, q_grade, my_rating, created_at, photo_file_id, photo_file_unique_id
             FROM coffee
             ORDER BY created_at DESC
         """)
@@ -188,7 +215,9 @@ class Database:
                 roaster=row[5],
                 q_grade=row[6],
                 my_rating=row[7],
-                created_at=datetime.fromisoformat(row[8]) if row[8] else None
+                created_at=datetime.fromisoformat(row[8]) if row[8] else None,
+                photo_file_id=row[9] if len(row) > 9 else None,
+                photo_file_unique_id=row[10] if len(row) > 10 else None
             )
             coffee_list.append(coffee)
         return coffee_list
