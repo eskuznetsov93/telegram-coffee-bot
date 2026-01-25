@@ -523,13 +523,15 @@ class CoffeeBot:
         await query.answer()
         
         if query.data == "confirm_plantation_no":
-            # User wants to enter plantation manually - clear subsequent extracted data
+            # User wants to enter plantation manually - clear ONLY plantation and processing data
+            # CRITICAL: DO NOT clear roaster data! It may have been correctly extracted even if plantation was wrong
             context.user_data.pop('plantation', None)
             context.user_data.pop('plantation_extracted', None)
             context.user_data.pop('processing', None)
             context.user_data.pop('processing_extracted', None)
-            context.user_data.pop('roaster', None)
-            context.user_data.pop('roaster_extracted', None)
+            # DO NOT clear roaster - it should be preserved!
+            logger.info(f"=== Plantation rejected by user ===")
+            logger.info(f"Preserving roaster data: roaster={context.user_data.get('roaster')}, roaster_extracted={context.user_data.get('roaster_extracted')}")
             await query.edit_message_text(f"Plantation: (will be entered manually)")
             from telegram import Update as UpdateType
             fake_update = UpdateType(update_id=0, message=query.message)
@@ -724,6 +726,20 @@ class CoffeeBot:
         """Continue to plantation selection"""
         # Get message object (could be from Update or Message)
         message = update.message if hasattr(update, 'message') and update.message else update
+        
+        # CRITICAL: Preserve roaster data - it may have been correctly extracted even if plantation was wrong
+        roaster_backup = context.user_data.get('roaster')
+        roaster_extracted_backup = context.user_data.get('roaster_extracted')
+        logger.info(f"=== _continue_to_plantation called ===")
+        logger.info(f"Preserving roaster data: roaster={roaster_backup}, roaster_extracted={roaster_extracted_backup}")
+        
+        # CRITICAL: Restore roaster data if it was lost
+        if roaster_backup and not context.user_data.get('roaster'):
+            logger.warning(f"Roaster data was lost in _continue_to_plantation! Restoring: {roaster_backup}")
+            context.user_data['roaster'] = roaster_backup
+        if roaster_extracted_backup and not context.user_data.get('roaster_extracted'):
+            logger.warning(f"Roaster_extracted flag was lost in _continue_to_plantation! Restoring: {roaster_extracted_backup}")
+            context.user_data['roaster_extracted'] = roaster_extracted_backup
         
         country = context.user_data.get('country')
         if not country:
@@ -999,6 +1015,12 @@ class CoffeeBot:
         query = update.callback_query
         await query.answer()
         
+        # CRITICAL: Save roaster data before plantation selection
+        roaster_backup = context.user_data.get('roaster')
+        roaster_extracted_backup = context.user_data.get('roaster_extracted')
+        logger.info(f"=== Plantation selected ===")
+        logger.info(f"Preserving roaster data: roaster={roaster_backup}, roaster_extracted={roaster_extracted_backup}")
+        
         if query.data == "plantation_new":
             # User wants to enter a new plantation
             await query.edit_message_text(f"Enter plantation name for {context.user_data.get('country', '')}:")
@@ -1006,6 +1028,14 @@ class CoffeeBot:
         
         plantation = query.data.replace("plantation_", "")
         context.user_data['plantation'] = plantation
+        
+        # CRITICAL: Restore roaster data if it was lost
+        if roaster_backup and not context.user_data.get('roaster'):
+            logger.warning(f"Roaster data was lost when plantation was selected! Restoring: {roaster_backup}")
+            context.user_data['roaster'] = roaster_backup
+        if roaster_extracted_backup and not context.user_data.get('roaster_extracted'):
+            logger.warning(f"Roaster_extracted flag was lost when plantation was selected! Restoring: {roaster_extracted_backup}")
+            context.user_data['roaster_extracted'] = roaster_extracted_backup
         
         # Create buttons for processing selection
         keyboard = [
@@ -1023,8 +1053,29 @@ class CoffeeBot:
     
     async def get_plantation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Get plantation (text input)"""
+        # CRITICAL: Save roaster data BEFORE any operations
+        roaster_backup = context.user_data.get('roaster')
+        roaster_extracted_backup = context.user_data.get('roaster_extracted')
+        logger.info(f"=== Plantation entered ===")
+        logger.info(f"BEFORE: roaster={roaster_backup}, roaster_extracted={roaster_extracted_backup}")
+        logger.info(f"Full context BEFORE: {dict((k, v) for k, v in context.user_data.items() if 'roaster' in k.lower() or 'extracted' in k.lower())}")
+        
         plantation = update.message.text.strip()
         context.user_data['plantation'] = plantation
+        
+        # CRITICAL: Restore roaster data if it was lost
+        if roaster_backup and not context.user_data.get('roaster'):
+            logger.warning(f"Roaster data was lost when plantation was entered! Restoring: {roaster_backup}")
+            context.user_data['roaster'] = roaster_backup
+        if roaster_extracted_backup and not context.user_data.get('roaster_extracted'):
+            logger.warning(f"Roaster_extracted flag was lost when plantation was entered! Restoring: {roaster_extracted_backup}")
+            context.user_data['roaster_extracted'] = roaster_extracted_backup
+        
+        # Verify roaster is still there
+        roaster_after = context.user_data.get('roaster')
+        roaster_extracted_after = context.user_data.get('roaster_extracted')
+        logger.info(f"AFTER: roaster={roaster_after}, roaster_extracted={roaster_extracted_after}")
+        logger.info(f"Full context AFTER: {dict((k, v) for k, v in context.user_data.items() if 'roaster' in k.lower() or 'extracted' in k.lower())}")
         
         # Create buttons for processing selection
         keyboard = [
@@ -1044,11 +1095,12 @@ class CoffeeBot:
         query = update.callback_query
         await query.answer()
         
-        # CRITICAL: Save roaster data before processing selection
+        # CRITICAL: Save roaster data BEFORE any operations
         roaster_backup = context.user_data.get('roaster')
         roaster_extracted_backup = context.user_data.get('roaster_extracted')
         logger.info(f"=== Processing selected ===")
-        logger.info(f"Preserving roaster data: roaster={roaster_backup}, roaster_extracted={roaster_extracted_backup}")
+        logger.info(f"BEFORE: roaster={roaster_backup}, roaster_extracted={roaster_extracted_backup}")
+        logger.info(f"Full context BEFORE: {dict((k, v) for k, v in context.user_data.items() if 'roaster' in k.lower() or 'extracted' in k.lower())}")
         
         processing = query.data.replace("processing_", "")
         context.user_data['processing'] = processing
@@ -1064,11 +1116,14 @@ class CoffeeBot:
         await query.edit_message_text(f"Processing type: {processing}")
         
         # CRITICAL: Check if roaster was extracted - if so, show confirmation instead of manual input
+        # Double-check roaster data AFTER all operations
         roaster = context.user_data.get('roaster')
         roaster_extracted = context.user_data.get('roaster_extracted')
+        logger.info(f"AFTER: roaster={roaster}, roaster_extracted={roaster_extracted}")
+        logger.info(f"Full context AFTER: {dict((k, v) for k, v in context.user_data.items() if 'roaster' in k.lower() or 'extracted' in k.lower())}")
         
         if roaster_extracted and roaster:
-            logger.info(f"Roaster was extracted, showing confirmation: {roaster}")
+            logger.info(f"✓ Roaster was extracted, showing confirmation: {roaster}")
             keyboard = [
                 [InlineKeyboardButton("✅ Yes", callback_data="confirm_roaster_yes")],
                 [InlineKeyboardButton("❌ No", callback_data="confirm_roaster_no")]
@@ -1076,6 +1131,9 @@ class CoffeeBot:
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.message.reply_text(f"Roaster: {roaster}\n\nCorrect?", reply_markup=reply_markup)
             return CONFIRM_ROASTER
+        else:
+            logger.error(f"✗ Roaster NOT found after processing selection! roaster={roaster}, roaster_extracted={roaster_extracted}")
+            logger.error(f"Full context: {dict(context.user_data)}")
         
         # Get list of existing roasters
         roasters = self.db.get_all_roasters()
