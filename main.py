@@ -785,17 +785,31 @@ class CoffeeBot:
         if 'roaster' not in result:
             # Try to find words that look like brand names (all caps, 2-4 words)
             # This is a fallback for cases like "DAK COFFEE"
+            words_original = text.split()
             words = text_upper.split()
-            # Look for sequences of 2-4 capitalized words that aren't countries or processing
+            
+            # Look for sequences of 2-3 words that might be roaster
+            # Common pattern: "BRAND COFFEE" or "BRAND NAME"
             for i in range(len(words) - 1):
-                potential_roaster = ' '.join(words[i:i+2])
-                if (len(potential_roaster) >= 3 and 
-                    potential_roaster not in countries and 
-                    potential_roaster not in processing_types and
-                    not any(p in potential_roaster for p in ['PROCESS', 'ROAST', 'COFFEE', 'FROM', 'FINCA'])):
+                # Try 2-word combinations
+                potential_roaster_upper = ' '.join(words[i:i+2])
+                potential_roaster = ' '.join(words_original[i:i+2])
+                
+                # Check if it looks like a brand name (not country, not processing, not common words)
+                # Allow "COFFEE" in roaster name (like "DAK COFFEE")
+                excluded_starters = ['PROCESS', 'ROAST', 'ROASTER', 'FROM', 'FINCA', 'ESTATE', 'FARM', 'PLANTATION']
+                first_word = words[i] if i < len(words) else ''
+                
+                is_valid = (len(potential_roaster) >= 3 and 
+                           potential_roaster_upper not in countries and 
+                           potential_roaster_upper not in processing_types and
+                           first_word not in excluded_starters and
+                           not potential_roaster_upper.startswith(tuple(excluded_starters)))
+                
+                if is_valid:
                     # Check if it's not already found as plantation
-                    if potential_roaster != result.get('plantation', '').upper():
-                        result['roaster'] = ' '.join(text.split()[i:i+2])  # Use original case
+                    if potential_roaster_upper != result.get('plantation', '').upper():
+                        result['roaster'] = potential_roaster
                         logger.info(f"Found roaster by fallback pattern: {result['roaster']}")
                         break
         
