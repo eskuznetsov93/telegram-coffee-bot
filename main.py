@@ -398,6 +398,9 @@ class CoffeeBot:
         else:
             # Plantation confirmed, check processing
             context.user_data.pop('plantation_extracted', None)
+            plantation = context.user_data.get('plantation', '')
+            await query.edit_message_text(f"Plantation: {plantation}")
+            
             if context.user_data.get('processing_extracted'):
                 processing = context.user_data.get('processing')
                 keyboard = [
@@ -405,11 +408,9 @@ class CoffeeBot:
                     [InlineKeyboardButton("❌ No", callback_data="confirm_processing_no")]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
-                await query.edit_message_text(f"Plantation: {context.user_data.get('plantation')}")
                 await query.message.reply_text(f"Processing: {processing}\n\nCorrect?", reply_markup=reply_markup)
                 return CONFIRM_PROCESSING
             else:
-                await query.edit_message_text(f"Plantation: {context.user_data.get('plantation')}")
                 from telegram import Update as UpdateType
                 fake_update = UpdateType(update_id=0, message=query.message)
                 return await self._continue_to_processing(fake_update, context)
