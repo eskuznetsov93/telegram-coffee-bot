@@ -16,5 +16,3 @@ class Coffee:
     q_grade: Optional[int] = None
     my_rating: Optional[int] = None
     created_at: Optional[datetime] = None
-    photo_file_id: Optional[str] = None
-    photo_file_unique_id: Optional[str] = None
