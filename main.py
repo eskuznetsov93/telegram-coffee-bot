@@ -728,12 +728,27 @@ class CoffeeBot:
         # Get message object (could be from Update or Message)
         message = update.message if hasattr(update, 'message') and update.message else update
         
-        # Don't clear roaster data here - it should be preserved
-        # Only clear if user explicitly rejected it (in confirm_roaster_no)
+        # CRITICAL: Check if roaster was already extracted - if so, show confirmation instead!
         roaster = context.user_data.get('roaster')
         roaster_extracted = context.user_data.get('roaster_extracted')
-        logger.info(f"_continue_to_roaster: roaster={roaster}, roaster_extracted={roaster_extracted}")
         
+        logger.info(f"=== _continue_to_roaster called ===")
+        logger.info(f"roaster={roaster}, roaster_extracted={roaster_extracted}")
+        logger.info(f"Full context: {dict(context.user_data)}")
+        
+        # If roaster was extracted, show confirmation instead of manual input
+        if roaster_extracted and roaster:
+            logger.info(f"Roaster was extracted, showing confirmation instead of manual input")
+            keyboard = [
+                [InlineKeyboardButton("✅ Yes", callback_data="confirm_roaster_yes")],
+                [InlineKeyboardButton("❌ No", callback_data="confirm_roaster_no")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await message.reply_text(f"Roaster: {roaster}\n\nCorrect?", reply_markup=reply_markup)
+            return CONFIRM_ROASTER
+        
+        # Don't clear roaster data here - it should be preserved
+        # Only clear if user explicitly rejected it (in confirm_roaster_no)
         roasters = self.db.get_all_roasters()
         
         if roasters:
@@ -1000,12 +1015,21 @@ class CoffeeBot:
         
         if query.data == "roaster_new":
             # User wants to enter a new roaster
+            # CRITICAL: If roaster was extracted, clear the extracted flag when user manually enters
+            if context.user_data.get('roaster_extracted'):
+                logger.info(f"User choosing to enter new roaster, clearing roaster_extracted flag")
+                context.user_data.pop('roaster_extracted', None)
             await query.edit_message_text("Enter roaster name:")
             return ROASTER
         
         roaster = query.data.replace("roaster_", "")
         # Roaster from button is already normalized (from database)
+        # CRITICAL: Clear extracted flag when user selects from buttons (manual choice)
+        if context.user_data.get('roaster_extracted'):
+            logger.info(f"User selected roaster from buttons, clearing roaster_extracted flag")
+            context.user_data.pop('roaster_extracted', None)
         context.user_data['roaster'] = roaster
+        logger.info(f"User selected roaster: {roaster}")
         
         # Create buttons for Q-grade selection
         keyboard = [
@@ -1030,6 +1054,12 @@ class CoffeeBot:
     
     async def get_roaster(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Get roaster (text input)"""
+        # CRITICAL: If roaster was extracted, clear the extracted flag when user manually enters
+        # This allows user to override OCR result
+        if context.user_data.get('roaster_extracted'):
+            logger.info(f"User manually entering roaster, clearing roaster_extracted flag")
+            context.user_data.pop('roaster_extracted', None)
+        
         roaster = update.message.text.strip()
         # Normalize: find existing roaster with same name (case-insensitive) or use as is
         existing_roasters = self.db.get_all_roasters(limit=1000)  # Get all to find match
@@ -1038,6 +1068,7 @@ class CoffeeBot:
                 roaster = existing  # Use the existing version (preserves original case)
                 break
         context.user_data['roaster'] = roaster
+        logger.info(f"User entered roaster: {roaster}")
         
         # Get list of existing roasters to show buttons
         roasters = self.db.get_all_roasters()
