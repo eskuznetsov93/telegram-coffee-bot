@@ -34,7 +34,7 @@ OCR_API_URL = "https://api.ocr.space/parse/image"
 OCR_API_KEY_ENV = "OCR_SPACE_API_KEY"
 
 # Состояния разговора
-PHOTO, COUNTRY, PLANTATION, PROCESSING, ROASTER, Q_GRADE, MY_RATING = range(7)
+PHOTO, CONFIRM_COUNTRY, CONFIRM_PLANTATION, CONFIRM_PROCESSING, CONFIRM_ROASTER, COUNTRY, PLANTATION, PROCESSING, ROASTER, Q_GRADE, MY_RATING = range(11)
 
 
 class CoffeeBot:
@@ -297,132 +297,203 @@ class CoffeeBot:
                     "⚠️ OCR failed or not configured. Please fill the form manually."
                 )
             
-            # Fill context with extracted data
+            # Fill context with extracted data (mark as extracted for confirmation)
             if extracted_data.get('country'):
                 context.user_data['country'] = extracted_data['country']
+                context.user_data['country_extracted'] = True
             if extracted_data.get('plantation'):
                 context.user_data['plantation'] = extracted_data['plantation']
+                context.user_data['plantation_extracted'] = True
             if extracted_data.get('processing'):
                 context.user_data['processing'] = extracted_data['processing']
+                context.user_data['processing_extracted'] = True
             if extracted_data.get('roaster'):
                 context.user_data['roaster'] = extracted_data['roaster']
+                context.user_data['roaster_extracted'] = True
             
         except Exception as e:
             logger.error(f"Error processing photo: {e}", exc_info=True)
             await update.message.reply_text("⚠️ Error processing photo. Please fill the form manually.")
         
-        # Continue to country selection
-        return await self._continue_to_country(update, context)
+        # Start confirmation flow for extracted data
+        return await self._start_confirmation_flow(update, context)
     
     async def skip_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Skip photo upload"""
         await update.message.reply_text("Skipping photo upload. Let's fill the form manually.")
-        return await self._continue_to_country(update, context)
+        return await self._start_confirmation_flow(update, context)
+    
+    async def _start_confirmation_flow(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Start confirmation flow for extracted data or go to manual input"""
+        # Check country first
+        if context.user_data.get('country_extracted'):
+            country = context.user_data.get('country')
+            keyboard = [
+                [InlineKeyboardButton("✅ Yes", callback_data="confirm_country_yes")],
+                [InlineKeyboardButton("❌ No", callback_data="confirm_country_no")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(f"Country: {country}\n\nCorrect?", reply_markup=reply_markup)
+            return CONFIRM_COUNTRY
+        else:
+            return await self._continue_to_country(update, context)
+    
+    async def confirm_country(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle country confirmation"""
+        query = update.callback_query
+        await query.answer()
+        
+        if query.data == "confirm_country_no":
+            # User wants to enter country manually
+            context.user_data.pop('country', None)
+            context.user_data.pop('country_extracted', None)
+            # Create a fake Update object with message
+            from telegram import Update as UpdateType
+            fake_update = UpdateType(update_id=0, message=query.message)
+            return await self._continue_to_country(fake_update, context)
+        else:
+            # Country confirmed, check plantation
+            context.user_data.pop('country_extracted', None)
+            if context.user_data.get('plantation_extracted'):
+                plantation = context.user_data.get('plantation')
+                keyboard = [
+                    [InlineKeyboardButton("✅ Yes", callback_data="confirm_plantation_yes")],
+                    [InlineKeyboardButton("❌ No", callback_data="confirm_plantation_no")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(f"Country: {context.user_data.get('country')}")
+                await query.message.reply_text(f"Plantation: {plantation}\n\nCorrect?", reply_markup=reply_markup)
+                return CONFIRM_PLANTATION
+            else:
+                await query.edit_message_text(f"Country: {context.user_data.get('country')}")
+                from telegram import Update as UpdateType
+                fake_update = UpdateType(update_id=0, message=query.message)
+                return await self._continue_to_plantation(fake_update, context)
+    
+    async def confirm_plantation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle plantation confirmation"""
+        query = update.callback_query
+        await query.answer()
+        
+        if query.data == "confirm_plantation_no":
+            # User wants to enter plantation manually
+            context.user_data.pop('plantation', None)
+            context.user_data.pop('plantation_extracted', None)
+            await query.edit_message_text(f"Plantation: (will be entered manually)")
+            from telegram import Update as UpdateType
+            fake_update = UpdateType(update_id=0, message=query.message)
+            return await self._continue_to_plantation(fake_update, context)
+        else:
+            # Plantation confirmed, check processing
+            context.user_data.pop('plantation_extracted', None)
+            if context.user_data.get('processing_extracted'):
+                processing = context.user_data.get('processing')
+                keyboard = [
+                    [InlineKeyboardButton("✅ Yes", callback_data="confirm_processing_yes")],
+                    [InlineKeyboardButton("❌ No", callback_data="confirm_processing_no")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(f"Plantation: {context.user_data.get('plantation')}")
+                await query.message.reply_text(f"Processing: {processing}\n\nCorrect?", reply_markup=reply_markup)
+                return CONFIRM_PROCESSING
+            else:
+                await query.edit_message_text(f"Plantation: {context.user_data.get('plantation')}")
+                from telegram import Update as UpdateType
+                fake_update = UpdateType(update_id=0, message=query.message)
+                return await self._continue_to_processing(fake_update, context)
+    
+    async def confirm_processing(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle processing confirmation"""
+        query = update.callback_query
+        await query.answer()
+        
+        if query.data == "confirm_processing_no":
+            # User wants to enter processing manually
+            context.user_data.pop('processing', None)
+            context.user_data.pop('processing_extracted', None)
+            await query.edit_message_text(f"Processing: (will be entered manually)")
+            from telegram import Update as UpdateType
+            fake_update = UpdateType(update_id=0, message=query.message)
+            return await self._continue_to_processing(fake_update, context)
+        else:
+            # Processing confirmed, check roaster
+            context.user_data.pop('processing_extracted', None)
+            if context.user_data.get('roaster_extracted'):
+                roaster = context.user_data.get('roaster')
+                keyboard = [
+                    [InlineKeyboardButton("✅ Yes", callback_data="confirm_roaster_yes")],
+                    [InlineKeyboardButton("❌ No", callback_data="confirm_roaster_no")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(f"Processing: {context.user_data.get('processing')}")
+                await query.message.reply_text(f"Roaster: {roaster}\n\nCorrect?", reply_markup=reply_markup)
+                return CONFIRM_ROASTER
+            else:
+                await query.edit_message_text(f"Processing: {context.user_data.get('processing')}")
+                from telegram import Update as UpdateType
+                fake_update = UpdateType(update_id=0, message=query.message)
+                return await self._continue_to_roaster(fake_update, context)
+    
+    async def confirm_roaster(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle roaster confirmation"""
+        query = update.callback_query
+        await query.answer()
+        
+        if query.data == "confirm_roaster_no":
+            # User wants to enter roaster manually
+            context.user_data.pop('roaster', None)
+            context.user_data.pop('roaster_extracted', None)
+            await query.edit_message_text(f"Roaster: (will be entered manually)")
+            from telegram import Update as UpdateType
+            fake_update = UpdateType(update_id=0, message=query.message)
+            return await self._continue_to_roaster(fake_update, context)
+        else:
+            # Roaster confirmed, go to Q-grade
+            context.user_data.pop('roaster_extracted', None)
+            await query.edit_message_text(f"Roaster: {context.user_data.get('roaster')}")
+            
+            # Create buttons for Q-grade selection
+            keyboard = [
+                [InlineKeyboardButton("No", callback_data="qgrade_No")],
+                [
+                    InlineKeyboardButton("84", callback_data="qgrade_84"),
+                    InlineKeyboardButton("85", callback_data="qgrade_85"),
+                    InlineKeyboardButton("86", callback_data="qgrade_86"),
+                ],
+                [
+                    InlineKeyboardButton("87", callback_data="qgrade_87"),
+                    InlineKeyboardButton("88", callback_data="qgrade_88"),
+                    InlineKeyboardButton("89", callback_data="qgrade_89"),
+                ],
+                [InlineKeyboardButton("90+", callback_data="qgrade_90+")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.reply_text("Q-grader score", reply_markup=reply_markup)
+            return Q_GRADE
     
     async def _continue_to_country(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Continue to country selection (shared logic)"""
+        # Get message object (could be from Update or Message)
+        message = update.message if hasattr(update, 'message') and update.message else update
+        
         # Get list of existing countries
         countries = self.db.get_all_countries()
         
-        # If country was extracted, use it
-        country = context.user_data.get('country')
-        
-        if country:
-            # Country already extracted, go to plantation
-            plantations = self.db.get_plantations_by_country(country)
+        if countries:
+            keyboard = []
+            for i in range(0, len(countries), 2):
+                row = []
+                row.append(InlineKeyboardButton(countries[i], callback_data=f"country_{countries[i]}"))
+                if i + 1 < len(countries):
+                    row.append(InlineKeyboardButton(countries[i + 1], callback_data=f"country_{countries[i + 1]}"))
+                keyboard.append(row)
+            keyboard.append([InlineKeyboardButton("✏️ Enter new country", callback_data="country_new")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
             
-            if plantations:
-                keyboard = []
-                for i in range(0, len(plantations), 2):
-                    row = []
-                    row.append(InlineKeyboardButton(plantations[i], callback_data=f"plantation_{plantations[i]}"))
-                    if i + 1 < len(plantations):
-                        row.append(InlineKeyboardButton(plantations[i + 1], callback_data=f"plantation_{plantations[i + 1]}"))
-                    keyboard.append(row)
-                keyboard.append([InlineKeyboardButton("✏️ Enter new plantation", callback_data="plantation_new")])
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                await update.message.reply_text(f"Country: {country}\n\nPlantation for {country} (select from list or enter new)", reply_markup=reply_markup)
-            else:
-                # Check if plantation was extracted from photo
-                extracted_plantation = context.user_data.get('plantation')
-                if extracted_plantation:
-                    await update.message.reply_text(f"Country: {country}\n\nPlantation: {extracted_plantation}")
-                    # Auto-advance to processing if extracted
-                    processing = context.user_data.get('processing')
-                    if processing:
-                        await update.message.reply_text(f"Processing type: {processing}")
-                        # Auto-advance to roaster if extracted
-                        roaster = context.user_data.get('roaster')
-                        if roaster:
-                            await update.message.reply_text(f"Roaster: {roaster}")
-                            # Go directly to Q-grade
-                            keyboard = [
-                                [InlineKeyboardButton("No", callback_data="qgrade_No")],
-                                [
-                                    InlineKeyboardButton("84", callback_data="qgrade_84"),
-                                    InlineKeyboardButton("85", callback_data="qgrade_85"),
-                                    InlineKeyboardButton("86", callback_data="qgrade_86"),
-                                ],
-                                [
-                                    InlineKeyboardButton("87", callback_data="qgrade_87"),
-                                    InlineKeyboardButton("88", callback_data="qgrade_88"),
-                                    InlineKeyboardButton("89", callback_data="qgrade_89"),
-                                ],
-                                [InlineKeyboardButton("90+", callback_data="qgrade_90+")],
-                            ]
-                            reply_markup = InlineKeyboardMarkup(keyboard)
-                            await update.message.reply_text("Q-grader score", reply_markup=reply_markup)
-                            return Q_GRADE
-                        else:
-                            # Go to roaster selection
-                            roasters = self.db.get_all_roasters()
-                            if roasters:
-                                keyboard = []
-                                for i in range(0, len(roasters), 2):
-                                    row = []
-                                    row.append(InlineKeyboardButton(roasters[i], callback_data=f"roaster_{roasters[i]}"))
-                                    if i + 1 < len(roasters):
-                                        row.append(InlineKeyboardButton(roasters[i + 1], callback_data=f"roaster_{roasters[i + 1]}"))
-                                    keyboard.append(row)
-                                keyboard.append([InlineKeyboardButton("✏️ Enter new roaster", callback_data="roaster_new")])
-                                reply_markup = InlineKeyboardMarkup(keyboard)
-                                await update.message.reply_text("Roaster (select from list or enter new)", reply_markup=reply_markup)
-                            else:
-                                await update.message.reply_text("Roaster")
-                            return ROASTER
-                    else:
-                        # Go to processing selection
-                        keyboard = [
-                            [InlineKeyboardButton("Washed", callback_data="processing_Washed")],
-                            [InlineKeyboardButton("Natural", callback_data="processing_Natural")],
-                            [InlineKeyboardButton("Anaerobic", callback_data="processing_Anaerobic")],
-                            [InlineKeyboardButton("Honey", callback_data="processing_Honey")],
-                            [InlineKeyboardButton("Infused", callback_data="processing_Infused")],
-                        ]
-                        reply_markup = InlineKeyboardMarkup(keyboard)
-                        await update.message.reply_text("Processing type", reply_markup=reply_markup)
-                        return PROCESSING
-                else:
-                    await update.message.reply_text(f"Country: {country}\n\nPlantation")
-            return PLANTATION
+            await message.reply_text("Country (select from list or enter new)", reply_markup=reply_markup)
         else:
-            # No country extracted, show country selection
-            if countries:
-                keyboard = []
-                for i in range(0, len(countries), 2):
-                    row = []
-                    row.append(InlineKeyboardButton(countries[i], callback_data=f"country_{countries[i]}"))
-                    if i + 1 < len(countries):
-                        row.append(InlineKeyboardButton(countries[i + 1], callback_data=f"country_{countries[i + 1]}"))
-                    keyboard.append(row)
-                keyboard.append([InlineKeyboardButton("✏️ Enter new country", callback_data="country_new")])
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                await update.message.reply_text("Country (select from list or enter new)", reply_markup=reply_markup)
-            else:
-                await update.message.reply_text("Country")
-            return COUNTRY
+            await message.reply_text("Country")
+        return COUNTRY
     
     def _parse_coffee_info(self, text: str) -> dict:
         """Parse coffee information from OCR text"""
