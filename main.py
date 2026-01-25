@@ -408,9 +408,17 @@ class CoffeeBot:
             context.user_data['processing_extracted'] = True
             logger.info(f"Saved processing: {extracted_data['processing']}")
         if extracted_data.get('roaster'):
-            context.user_data['roaster'] = extracted_data['roaster']
+            roaster_value = extracted_data['roaster']
+            context.user_data['roaster'] = roaster_value
             context.user_data['roaster_extracted'] = True
-            logger.info(f"Saved roaster: {extracted_data['roaster']}")
+            logger.info(f"=== SAVED ROASTER FROM OCR ===")
+            logger.info(f"roaster={roaster_value}")
+            logger.info(f"roaster_extracted={context.user_data.get('roaster_extracted')}")
+            # Verify it's actually saved
+            if context.user_data.get('roaster') != roaster_value:
+                logger.error(f"CRITICAL: Roaster was NOT saved correctly! Expected: {roaster_value}, Got: {context.user_data.get('roaster')}")
+            else:
+                logger.info(f"✓ Roaster verified in context.user_data")
         
         # Log final state - CRITICAL: Verify roaster is saved
         logger.info(f"=== OCR COMPLETE ===")
@@ -429,13 +437,26 @@ class CoffeeBot:
     
     async def _start_confirmation_flow(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start confirmation flow for extracted data or go to manual input"""
+        # CRITICAL: Save roaster data to backup BEFORE starting confirmation flow
+        roaster_backup = context.user_data.get('roaster')
+        roaster_extracted_backup = context.user_data.get('roaster_extracted')
+        
         # CRITICAL: Log all data before starting confirmation flow
         logger.info(f"=== STARTING CONFIRMATION FLOW ===")
         logger.info(f"country={context.user_data.get('country')}, country_extracted={context.user_data.get('country_extracted')}")
         logger.info(f"plantation={context.user_data.get('plantation')}, plantation_extracted={context.user_data.get('plantation_extracted')}")
         logger.info(f"processing={context.user_data.get('processing')}, processing_extracted={context.user_data.get('processing_extracted')}")
         logger.info(f"roaster={context.user_data.get('roaster')}, roaster_extracted={context.user_data.get('roaster_extracted')}")
+        logger.info(f"roaster_backup={roaster_backup}, roaster_extracted_backup={roaster_extracted_backup}")
         logger.info(f"Full context: {dict(context.user_data)}")
+        
+        # CRITICAL: Restore roaster data if it was lost
+        if roaster_backup and not context.user_data.get('roaster'):
+            logger.warning(f"Roaster data was lost at start of confirmation flow! Restoring: {roaster_backup}")
+            context.user_data['roaster'] = roaster_backup
+        if roaster_extracted_backup and not context.user_data.get('roaster_extracted'):
+            logger.warning(f"Roaster_extracted flag was lost at start of confirmation flow! Restoring: {roaster_extracted_backup}")
+            context.user_data['roaster_extracted'] = roaster_extracted_backup
         
         # Check country first
         if context.user_data.get('country_extracted'):
@@ -520,11 +541,21 @@ class CoffeeBot:
             plantation = context.user_data.get('plantation', '')
             await query.edit_message_text(f"Plantation: {plantation}")
             
+            # CRITICAL: Save roaster data to backup BEFORE any operations
+            roaster_backup = context.user_data.get('roaster')
+            roaster_extracted_backup = context.user_data.get('roaster_extracted')
+            
             # Log roaster data to ensure it's preserved
-            roaster = context.user_data.get('roaster')
-            roaster_extracted = context.user_data.get('roaster_extracted')
             logger.info(f"=== Plantation confirmed ===")
-            logger.info(f"roaster={roaster}, roaster_extracted={roaster_extracted}")
+            logger.info(f"roaster_backup={roaster_backup}, roaster_extracted_backup={roaster_extracted_backup}")
+            
+            # CRITICAL: Restore roaster data if it was lost
+            if roaster_backup and not context.user_data.get('roaster'):
+                logger.warning(f"Roaster data was lost at plantation confirmation! Restoring: {roaster_backup}")
+                context.user_data['roaster'] = roaster_backup
+            if roaster_extracted_backup and not context.user_data.get('roaster_extracted'):
+                logger.warning(f"Roaster_extracted flag was lost at plantation confirmation! Restoring: {roaster_extracted_backup}")
+                context.user_data['roaster_extracted'] = roaster_extracted_backup
             
             if context.user_data.get('processing_extracted'):
                 processing = context.user_data.get('processing')
@@ -546,11 +577,13 @@ class CoffeeBot:
         await query.answer()
         
         if query.data == "confirm_processing_no":
-            # User wants to enter processing manually - clear subsequent extracted data
+            # User wants to enter processing manually - clear ONLY processing data
+            # CRITICAL: DO NOT clear roaster data! It may have been correctly extracted even if processing was wrong
             context.user_data.pop('processing', None)
             context.user_data.pop('processing_extracted', None)
-            context.user_data.pop('roaster', None)
-            context.user_data.pop('roaster_extracted', None)
+            # DO NOT clear roaster - it should be preserved!
+            logger.info(f"=== Processing rejected by user ===")
+            logger.info(f"Preserving roaster data: roaster={context.user_data.get('roaster')}, roaster_extracted={context.user_data.get('roaster_extracted')}")
             await query.edit_message_text(f"Processing: (will be entered manually)")
             from telegram import Update as UpdateType
             fake_update = UpdateType(update_id=0, message=query.message)
@@ -562,33 +595,48 @@ class CoffeeBot:
             processing = context.user_data.get('processing', '')
             await query.edit_message_text(f"Processing: {processing}")
             
-            # Check if roaster was extracted - log for debugging
-            # Get roaster data BEFORE any operations
-            roaster = context.user_data.get('roaster')
-            roaster_extracted = context.user_data.get('roaster_extracted')
+            # CRITICAL: Save roaster data to a backup variable BEFORE any operations
+            roaster_backup = context.user_data.get('roaster')
+            roaster_extracted_backup = context.user_data.get('roaster_extracted')
             
             # Log all context data for debugging
             logger.info(f"=== Processing confirmed ===")
-            logger.info(f"roaster={roaster}")
-            logger.info(f"roaster_extracted={roaster_extracted}")
+            logger.info(f"roaster_backup={roaster_backup}")
+            logger.info(f"roaster_extracted_backup={roaster_extracted_backup}")
             logger.info(f"All context keys: {list(context.user_data.keys())}")
             logger.info(f"All context data: {dict((k, v) for k, v in context.user_data.items() if not k.endswith('_extracted') or k == 'roaster_extracted')}")
             
+            # CRITICAL: Restore roaster data if it was lost
+            if roaster_backup and not context.user_data.get('roaster'):
+                logger.warning(f"Roaster data was lost! Restoring from backup: {roaster_backup}")
+                context.user_data['roaster'] = roaster_backup
+            if roaster_extracted_backup and not context.user_data.get('roaster_extracted'):
+                logger.warning(f"Roaster_extracted flag was lost! Restoring from backup: {roaster_extracted_backup}")
+                context.user_data['roaster_extracted'] = roaster_extracted_backup
+            
             # Check if we have roaster data (either extracted or manually entered)
-            if roaster_extracted and roaster:
-                logger.info(f"Roaster found, showing confirmation: {roaster}")
+            # CRITICAL: Double-check roaster data right before using it
+            roaster_check = context.user_data.get('roaster')
+            roaster_extracted_check = context.user_data.get('roaster_extracted')
+            logger.info(f"Double-check before condition: roaster={roaster_check}, roaster_extracted={roaster_extracted_check}")
+            
+            if roaster_extracted_check and roaster_check:
+                logger.info(f"✓ Roaster found, showing confirmation: {roaster_check}")
                 keyboard = [
                     [InlineKeyboardButton("✅ Yes", callback_data="confirm_roaster_yes")],
                     [InlineKeyboardButton("❌ No", callback_data="confirm_roaster_no")]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
-                await query.message.reply_text(f"Roaster: {roaster}\n\nCorrect?", reply_markup=reply_markup)
+                await query.message.reply_text(f"Roaster: {roaster_check}\n\nCorrect?", reply_markup=reply_markup)
                 return CONFIRM_ROASTER
             else:
-                logger.warning(f"=== NO ROASTER FOUND ===")
-                logger.warning(f"roaster={roaster}")
-                logger.warning(f"roaster_extracted={roaster_extracted}")
-                logger.warning(f"Full context: {dict(context.user_data)}")
+                logger.error(f"=== CRITICAL: NO ROASTER FOUND AFTER PROCESSING CONFIRMATION ===")
+                logger.error(f"roaster_backup={roaster_backup}")
+                logger.error(f"roaster_extracted_backup={roaster_extracted_backup}")
+                logger.error(f"roaster from context.user_data={roaster_check}")
+                logger.error(f"roaster_extracted from context.user_data={roaster_extracted_check}")
+                logger.error(f"Full context keys: {list(context.user_data.keys())}")
+                logger.error(f"Full context data: {dict(context.user_data)}")
                 from telegram import Update as UpdateType
                 fake_update = UpdateType(update_id=0, message=query.message)
                 return await self._continue_to_roaster(fake_update, context)
@@ -707,6 +755,20 @@ class CoffeeBot:
         """Continue to processing selection"""
         # Get message object (could be from Update or Message)
         message = update.message if hasattr(update, 'message') and update.message else update
+        
+        # CRITICAL: Preserve roaster data - it may have been correctly extracted even if processing was not
+        roaster_backup = context.user_data.get('roaster')
+        roaster_extracted_backup = context.user_data.get('roaster_extracted')
+        logger.info(f"=== _continue_to_processing called ===")
+        logger.info(f"Preserving roaster data: roaster={roaster_backup}, roaster_extracted={roaster_extracted_backup}")
+        
+        # CRITICAL: Restore roaster data if it was lost
+        if roaster_backup and not context.user_data.get('roaster'):
+            logger.warning(f"Roaster data was lost in _continue_to_processing! Restoring: {roaster_backup}")
+            context.user_data['roaster'] = roaster_backup
+        if roaster_extracted_backup and not context.user_data.get('roaster_extracted'):
+            logger.warning(f"Roaster_extracted flag was lost in _continue_to_processing! Restoring: {roaster_extracted_backup}")
+            context.user_data['roaster_extracted'] = roaster_extracted_backup
         
         # Don't clear processing data here - preserve it for user to see/confirm
         # Only clear if user explicitly rejected it
@@ -982,10 +1044,38 @@ class CoffeeBot:
         query = update.callback_query
         await query.answer()
         
+        # CRITICAL: Save roaster data before processing selection
+        roaster_backup = context.user_data.get('roaster')
+        roaster_extracted_backup = context.user_data.get('roaster_extracted')
+        logger.info(f"=== Processing selected ===")
+        logger.info(f"Preserving roaster data: roaster={roaster_backup}, roaster_extracted={roaster_extracted_backup}")
+        
         processing = query.data.replace("processing_", "")
         context.user_data['processing'] = processing
         
+        # CRITICAL: Restore roaster data if it was lost
+        if roaster_backup and not context.user_data.get('roaster'):
+            logger.warning(f"Roaster data was lost when processing was selected! Restoring: {roaster_backup}")
+            context.user_data['roaster'] = roaster_backup
+        if roaster_extracted_backup and not context.user_data.get('roaster_extracted'):
+            logger.warning(f"Roaster_extracted flag was lost when processing was selected! Restoring: {roaster_extracted_backup}")
+            context.user_data['roaster_extracted'] = roaster_extracted_backup
+        
         await query.edit_message_text(f"Processing type: {processing}")
+        
+        # CRITICAL: Check if roaster was extracted - if so, show confirmation instead of manual input
+        roaster = context.user_data.get('roaster')
+        roaster_extracted = context.user_data.get('roaster_extracted')
+        
+        if roaster_extracted and roaster:
+            logger.info(f"Roaster was extracted, showing confirmation: {roaster}")
+            keyboard = [
+                [InlineKeyboardButton("✅ Yes", callback_data="confirm_roaster_yes")],
+                [InlineKeyboardButton("❌ No", callback_data="confirm_roaster_no")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.reply_text(f"Roaster: {roaster}\n\nCorrect?", reply_markup=reply_markup)
+            return CONFIRM_ROASTER
         
         # Get list of existing roasters
         roasters = self.db.get_all_roasters()
