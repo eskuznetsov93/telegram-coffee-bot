@@ -120,7 +120,10 @@ class CoffeeBot:
         """Настройка обработчиков команд и сообщений"""
         # Обработчик добавления кофе
         add_coffee_handler = ConversationHandler(
-            entry_points=[CommandHandler("add", self.start_add_coffee)],
+            entry_points=[
+                CommandHandler("add", self.start_add_coffee),
+                MessageHandler(filters.PHOTO, self.get_photo)  # Фото без команды /add
+            ],
             states={
                 PHOTO: [
                     MessageHandler(filters.PHOTO, self.get_photo),
