@@ -181,11 +181,7 @@ class CoffeeBot:
             processing = item['processing'] if item['processing'] else "Not specified"
             # Format Q-grader for display
             if item['q_grade'] is None:
-                q_grade_text = "Q: —"
-            elif item['q_grade'] == 79:
-                q_grade_text = "Q: <80"
-            elif item['q_grade'] == 86:
-                q_grade_text = "Q: 85+"
+                q_grade_text = "Q: No"
             elif item['q_grade'] == 91:
                 q_grade_text = "Q: 90+"
             else:
@@ -211,11 +207,7 @@ class CoffeeBot:
             processing = item['processing'] if item['processing'] else "Not specified"
             # Format Q-grader for display
             if item['q_grade'] is None:
-                q_grade_text = "Q: —"
-            elif item['q_grade'] == 79:
-                q_grade_text = "Q: <80"
-            elif item['q_grade'] == 86:
-                q_grade_text = "Q: 85+"
+                q_grade_text = "Q: No"
             elif item['q_grade'] == 91:
                 q_grade_text = "Q: 90+"
             else:
@@ -366,21 +358,18 @@ class CoffeeBot:
                             await update.message.reply_text(f"Roaster: {roaster}")
                             # Go directly to Q-grade
                             keyboard = [
-                                [InlineKeyboardButton("<80", callback_data="qgrade_<80")],
+                                [InlineKeyboardButton("No", callback_data="qgrade_No")],
                                 [
-                                    InlineKeyboardButton("80", callback_data="qgrade_80"),
-                                    InlineKeyboardButton("81", callback_data="qgrade_81"),
-                                    InlineKeyboardButton("82", callback_data="qgrade_82"),
-                                ],
-                                [
-                                    InlineKeyboardButton("83", callback_data="qgrade_83"),
                                     InlineKeyboardButton("84", callback_data="qgrade_84"),
                                     InlineKeyboardButton("85", callback_data="qgrade_85"),
+                                    InlineKeyboardButton("86", callback_data="qgrade_86"),
                                 ],
                                 [
-                                    InlineKeyboardButton("85+", callback_data="qgrade_85+"),
-                                    InlineKeyboardButton("90+", callback_data="qgrade_90+"),
+                                    InlineKeyboardButton("87", callback_data="qgrade_87"),
+                                    InlineKeyboardButton("88", callback_data="qgrade_88"),
+                                    InlineKeyboardButton("89", callback_data="qgrade_89"),
                                 ],
+                                [InlineKeyboardButton("90+", callback_data="qgrade_90+")],
                             ]
                             reply_markup = InlineKeyboardMarkup(keyboard)
                             await update.message.reply_text("Q-grader score", reply_markup=reply_markup)
@@ -658,21 +647,18 @@ class CoffeeBot:
         
         # Create buttons for Q-grade selection
         keyboard = [
-            [InlineKeyboardButton("<80", callback_data="qgrade_<80")],
+            [InlineKeyboardButton("No", callback_data="qgrade_No")],
             [
-                InlineKeyboardButton("80", callback_data="qgrade_80"),
-                InlineKeyboardButton("81", callback_data="qgrade_81"),
-                InlineKeyboardButton("82", callback_data="qgrade_82"),
-            ],
-            [
-                InlineKeyboardButton("83", callback_data="qgrade_83"),
                 InlineKeyboardButton("84", callback_data="qgrade_84"),
                 InlineKeyboardButton("85", callback_data="qgrade_85"),
+                InlineKeyboardButton("86", callback_data="qgrade_86"),
             ],
             [
-                InlineKeyboardButton("85+", callback_data="qgrade_85+"),
-                InlineKeyboardButton("90+", callback_data="qgrade_90+"),
+                InlineKeyboardButton("87", callback_data="qgrade_87"),
+                InlineKeyboardButton("88", callback_data="qgrade_88"),
+                InlineKeyboardButton("89", callback_data="qgrade_89"),
             ],
+            [InlineKeyboardButton("90+", callback_data="qgrade_90+")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -712,21 +698,18 @@ class CoffeeBot:
         
         # Create buttons for Q-grade selection
         keyboard = [
-            [InlineKeyboardButton("<80", callback_data="qgrade_<80")],
+            [InlineKeyboardButton("No", callback_data="qgrade_No")],
             [
-                InlineKeyboardButton("80", callback_data="qgrade_80"),
-                InlineKeyboardButton("81", callback_data="qgrade_81"),
-                InlineKeyboardButton("82", callback_data="qgrade_82"),
-            ],
-            [
-                InlineKeyboardButton("83", callback_data="qgrade_83"),
                 InlineKeyboardButton("84", callback_data="qgrade_84"),
                 InlineKeyboardButton("85", callback_data="qgrade_85"),
+                InlineKeyboardButton("86", callback_data="qgrade_86"),
             ],
             [
-                InlineKeyboardButton("85+", callback_data="qgrade_85+"),
-                InlineKeyboardButton("90+", callback_data="qgrade_90+"),
+                InlineKeyboardButton("87", callback_data="qgrade_87"),
+                InlineKeyboardButton("88", callback_data="qgrade_88"),
+                InlineKeyboardButton("89", callback_data="qgrade_89"),
             ],
+            [InlineKeyboardButton("90+", callback_data="qgrade_90+")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -741,12 +724,9 @@ class CoffeeBot:
         q_grade_str = query.data.replace("qgrade_", "")
         
         # Convert string to number for storage
-        if q_grade_str == "<80":
-            context.user_data['q_grade'] = 79  # Store as 79 for sorting
-            q_grade_display = "<80"
-        elif q_grade_str == "85+":
-            context.user_data['q_grade'] = 86  # Store as 86 for sorting
-            q_grade_display = "85+"
+        if q_grade_str == "No":
+            context.user_data['q_grade'] = None  # Store as None for "No"
+            q_grade_display = "No"
         elif q_grade_str == "90+":
             context.user_data['q_grade'] = 91  # Store as 91 for sorting
             q_grade_display = "90+"
@@ -796,6 +776,29 @@ class CoffeeBot:
             context.user_data.clear()
             
             await update.message.reply_text("☕ Coffee added!")
+            
+            # Show user's coffee list after adding
+            user_id = update.effective_user.id
+            grouped_coffee = self.db.get_grouped_coffee_by_user(user_id)
+            
+            if grouped_coffee:
+                message_parts = []
+                for i, item in enumerate(grouped_coffee, 1):
+                    stars = self._rating_to_stars(item['max_rating'])
+                    roaster = item['roaster'] if item['roaster'] else "Not specified"
+                    processing = item['processing'] if item['processing'] else "Not specified"
+                    # Format Q-grader for display
+                    if item['q_grade'] is None:
+                        q_grade_text = "Q: No"
+                    elif item['q_grade'] == 91:
+                        q_grade_text = "Q: 90+"
+                    else:
+                        q_grade_text = f"Q: {item['q_grade']}"
+                    message_parts.append(f"{i}. {item['country']} | {item['plantation']} | {processing} | {roaster} | {q_grade_text} — {stars}")
+                
+                message = "\n".join(message_parts)
+                await update.message.reply_text(f"📋 Your coffee list:\n\n{message}")
+            
             return ConversationHandler.END
         except ValueError:
             await update.message.reply_text("Please enter a number from 1 to 5.")
