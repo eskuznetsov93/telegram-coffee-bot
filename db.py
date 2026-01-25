@@ -90,6 +90,21 @@ class Database:
         
         return None
     
+    def _normalize_processing(self, processing: str) -> str:
+        """Нормализация обработки: все варианты с 'Anaerobic' объединяются в 'Anaerobic'
+        Возвращает нормализованное значение для группировки (все Anaerobic варианты -> 'Anaerobic')"""
+        if not processing:
+            return ""
+        
+        normalized = self._normalize_name(processing)
+        
+        # Если содержит 'anaerobic', нормализуем к 'Anaerobic' (с заглавной для отображения)
+        if 'anaerobic' in normalized:
+            return 'Anaerobic'
+        
+        # Для остальных возвращаем с заглавной буквы
+        return processing.strip() if processing else ""
+    
     def _normalize_for_grouping(self, name: str) -> str:
         """Нормализация названия для группировки с учетом опечаток"""
         if not name:
@@ -498,36 +513,73 @@ class Database:
         return [row[0] for row in rows] if rows else []
     
     def get_grouped_coffee_by_user(self, user_id: int) -> List[dict]:
-        """Получение кофе пользователя, сгруппированных по plantation+processing+roaster (без q_grade), отсортированных по рейтингу"""
+        """Получение кофе пользователя, сгруппированных по plantation+processing+roaster (без q_grade), отсортированных по рейтингу
+        Все варианты обработки с 'Anaerobic' объединяются в одну позицию"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
+        
+        # Получаем все записи пользователя
         cursor.execute("""
             SELECT 
                 plantation,
                 processing,
                 roaster,
                 country,
-                MAX(my_rating) as max_rating,
-                COUNT(*) as count
+                my_rating
             FROM coffee
             WHERE user_id = ?
-            GROUP BY plantation, processing, roaster
-            ORDER BY max_rating DESC, count DESC
         """, (user_id,))
         rows = cursor.fetchall()
         conn.close()
         
-        result = []
+        if not rows:
+            return []
+        
+        # Группируем с нормализацией processing
+        grouped = {}
         for row in rows:
+            plantation = row[0] or ""
+            processing = row[1] or ""
+            roaster = row[2] or ""
+            country = row[3] or ""
+            rating = row[4]
+            
+            # Нормализуем processing (объединяем все Anaerobic варианты)
+            norm_processing = self._normalize_processing(processing)
+            
+            # Используем нормализованное processing для группировки
+            group_key = (plantation, norm_processing, roaster)
+            
+            if group_key not in grouped:
+                grouped[group_key] = {
+                    'plantation': plantation,
+                    'processing': norm_processing,  # Используем нормализованное значение
+                    'roaster': roaster,
+                    'country': country,
+                    'ratings': [],
+                    'count': 0
+                }
+            
+            if rating is not None:
+                grouped[group_key]['ratings'].append(rating)
+            grouped[group_key]['count'] += 1
+        
+        # Формируем результат с максимальным рейтингом
+        result = []
+        for group_key, group_data in grouped.items():
+            max_rating = max(group_data['ratings']) if group_data['ratings'] else None
             result.append({
-                'plantation': row[0],
-                'processing': row[1],
-                'q_grade': None,  # Не показываем q_grade в группировке
-                'roaster': row[2],
-                'country': row[3],
-                'max_rating': row[4],
-                'count': row[5]
+                'plantation': group_data['plantation'],
+                'processing': group_data['processing'],
+                'q_grade': None,
+                'roaster': group_data['roaster'],
+                'country': group_data['country'],
+                'max_rating': max_rating,
+                'count': group_data['count']
             })
+        
+        # Сортируем по рейтингу
+        result.sort(key=lambda x: (x['max_rating'] if x['max_rating'] is not None else 0, x['count']), reverse=True)
         return result
     
     def get_grouped_coffee_average_rating(self) -> List[dict]:
@@ -581,13 +633,16 @@ class Database:
             norm_plantation = plantation_groups.get(plantation, plantation) if plantation else ""
             norm_roaster = roaster_groups.get(roaster, roaster) if roaster else ""
             
+            # Нормализуем processing (объединяем все Anaerobic варианты)
+            norm_processing = self._normalize_processing(processing)
+            
             # Используем нормализованные значения как ключ группы (БЕЗ q_grade - игнорируем разные оценки Q-грейдера)
-            group_key = (norm_plantation, processing, norm_roaster)
+            group_key = (norm_plantation, norm_processing, norm_roaster)
             
             if group_key not in grouped:
                 grouped[group_key] = {
                     'plantation': norm_plantation,
-                    'processing': processing,
+                    'processing': norm_processing,  # Используем нормализованное значение
                     'q_grade': None,  # Не показываем q_grade в группировке
                     'roaster': norm_roaster,
                     'country': country,  # Берем первую встретившуюся страну
