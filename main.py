@@ -356,9 +356,15 @@ class CoffeeBot:
         await query.answer()
         
         if query.data == "confirm_country_no":
-            # User wants to enter country manually
+            # User wants to enter country manually - clear all extracted data
             context.user_data.pop('country', None)
             context.user_data.pop('country_extracted', None)
+            context.user_data.pop('plantation', None)
+            context.user_data.pop('plantation_extracted', None)
+            context.user_data.pop('processing', None)
+            context.user_data.pop('processing_extracted', None)
+            context.user_data.pop('roaster', None)
+            context.user_data.pop('roaster_extracted', None)
             # Create a fake Update object with message
             from telegram import Update as UpdateType
             fake_update = UpdateType(update_id=0, message=query.message)
@@ -388,9 +394,13 @@ class CoffeeBot:
         await query.answer()
         
         if query.data == "confirm_plantation_no":
-            # User wants to enter plantation manually
+            # User wants to enter plantation manually - clear subsequent extracted data
             context.user_data.pop('plantation', None)
             context.user_data.pop('plantation_extracted', None)
+            context.user_data.pop('processing', None)
+            context.user_data.pop('processing_extracted', None)
+            context.user_data.pop('roaster', None)
+            context.user_data.pop('roaster_extracted', None)
             await query.edit_message_text(f"Plantation: (will be entered manually)")
             from telegram import Update as UpdateType
             fake_update = UpdateType(update_id=0, message=query.message)
@@ -421,9 +431,11 @@ class CoffeeBot:
         await query.answer()
         
         if query.data == "confirm_processing_no":
-            # User wants to enter processing manually
+            # User wants to enter processing manually - clear subsequent extracted data
             context.user_data.pop('processing', None)
             context.user_data.pop('processing_extracted', None)
+            context.user_data.pop('roaster', None)
+            context.user_data.pop('roaster_extracted', None)
             await query.edit_message_text(f"Processing: (will be entered manually)")
             from telegram import Update as UpdateType
             fake_update = UpdateType(update_id=0, message=query.message)
@@ -489,6 +501,10 @@ class CoffeeBot:
         # Get message object (could be from Update or Message)
         message = update.message if hasattr(update, 'message') and update.message else update
         
+        # Clear any extracted country data if we're doing manual input
+        if not context.user_data.get('country_extracted'):
+            context.user_data.pop('country', None)
+        
         # Get list of existing countries
         countries = self.db.get_all_countries()
         
@@ -507,6 +523,86 @@ class CoffeeBot:
         else:
             await message.reply_text("Country")
         return COUNTRY
+    
+    async def _continue_to_plantation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Continue to plantation selection"""
+        # Get message object (could be from Update or Message)
+        message = update.message if hasattr(update, 'message') and update.message else update
+        
+        country = context.user_data.get('country')
+        if not country:
+            # Should not happen, but fallback
+            return await self._continue_to_country(update, context)
+        
+        # Clear any extracted plantation data if we're doing manual input
+        if not context.user_data.get('plantation_extracted'):
+            context.user_data.pop('plantation', None)
+        
+        plantations = self.db.get_plantations_by_country(country)
+        
+        if plantations:
+            keyboard = []
+            for i in range(0, len(plantations), 2):
+                row = []
+                row.append(InlineKeyboardButton(plantations[i], callback_data=f"plantation_{plantations[i]}"))
+                if i + 1 < len(plantations):
+                    row.append(InlineKeyboardButton(plantations[i + 1], callback_data=f"plantation_{plantations[i + 1]}"))
+                keyboard.append(row)
+            keyboard.append([InlineKeyboardButton("✏️ Enter new plantation", callback_data="plantation_new")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await message.reply_text(f"Plantation for {country} (select from list or enter new)", reply_markup=reply_markup)
+        else:
+            await message.reply_text("Plantation")
+        return PLANTATION
+    
+    async def _continue_to_processing(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Continue to processing selection"""
+        # Get message object (could be from Update or Message)
+        message = update.message if hasattr(update, 'message') and update.message else update
+        
+        # Clear any extracted processing data if we're doing manual input
+        if not context.user_data.get('processing_extracted'):
+            context.user_data.pop('processing', None)
+        
+        keyboard = [
+            [InlineKeyboardButton("Washed", callback_data="processing_Washed")],
+            [InlineKeyboardButton("Natural", callback_data="processing_Natural")],
+            [InlineKeyboardButton("Anaerobic", callback_data="processing_Anaerobic")],
+            [InlineKeyboardButton("Honey", callback_data="processing_Honey")],
+            [InlineKeyboardButton("Infused", callback_data="processing_Infused")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await message.reply_text("Processing type", reply_markup=reply_markup)
+        return PROCESSING
+    
+    async def _continue_to_roaster(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Continue to roaster selection"""
+        # Get message object (could be from Update or Message)
+        message = update.message if hasattr(update, 'message') and update.message else update
+        
+        # Clear any extracted roaster data if we're doing manual input
+        if not context.user_data.get('roaster_extracted'):
+            context.user_data.pop('roaster', None)
+        
+        roasters = self.db.get_all_roasters()
+        
+        if roasters:
+            keyboard = []
+            for i in range(0, len(roasters), 2):
+                row = []
+                row.append(InlineKeyboardButton(roasters[i], callback_data=f"roaster_{roasters[i]}"))
+                if i + 1 < len(roasters):
+                    row.append(InlineKeyboardButton(roasters[i + 1], callback_data=f"roaster_{roasters[i + 1]}"))
+                keyboard.append(row)
+            keyboard.append([InlineKeyboardButton("✏️ Enter new roaster", callback_data="roaster_new")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await message.reply_text("Roaster (select from list or enter new)", reply_markup=reply_markup)
+        else:
+            await message.reply_text("Roaster")
+        return ROASTER
     
     def _parse_coffee_info(self, text: str) -> dict:
         """Parse coffee information from OCR text"""
